@@ -1,0 +1,34 @@
+{
+    "application_name": "retry_test",
+    "email_address": "test@example.com",
+    "email_on_success": false,
+    "email_on_failure": false,
+    "env_variables": {
+        "APP_ENV": "test",
+        "LOG_LEVEL": "debug"
+    },
+    "jobs": [
+        {
+            "id": "retry_job",
+            "description": "Job that fails but should succeed after retries",
+            "command": "python3 /home/sjoshi/claudelab/maestro/test_scripts/retry_script.py",
+            "timeout": 10,
+            "max_retries": 3,
+            "retry_delay": 1,
+            "retry_backoff": 1.5,
+            "env_variables": {
+                "TEST_JOB": "retry_job"
+            }
+        },
+        {
+            "id": "dependent_on_retry",
+            "description": "Job dependent on the retry job",
+            "command": "python3 /home/sjoshi/claudelab/maestro/test_scripts/success_script.py",
+            "dependencies": ["retry_job"],
+            "timeout": 10,
+            "env_variables": {
+                "TEST_JOB": "dependent_on_retry"
+            }
+        }
+    ]
+}

@@ -1,0 +1,34 @@
+{
+    "application_name": "security_test",
+    "email_address": "test@example.com",
+    "email_on_success": false,
+    "email_on_failure": false,
+    "allow_shell": true,
+    "security_policy": "warn",
+    "env_variables": {
+        "APP_ENV": "test",
+        "LOG_LEVEL": "debug"
+    },
+    "jobs": [
+        {
+            "id": "safe_cmd",
+            "description": "Safe command",
+            "command": "echo 'This is a safe command'",
+            "timeout": 10
+        },
+        {
+            "id": "potentially_unsafe",
+            "description": "Potentially unsafe command that uses rm",
+            "command": "touch /tmp/safe_to_delete.txt && rm -f /tmp/safe_to_delete.txt",
+            "timeout": 10,
+            "dependencies": ["safe_cmd"] 
+        },
+        {
+            "id": "command_injection",
+            "description": "Command that attempts command substitution",
+            "command": "echo \"The date is: $(date)\"",
+            "timeout": 10,
+            "dependencies": ["potentially_unsafe"]
+        }
+    ]
+}

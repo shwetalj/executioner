@@ -1,0 +1,60 @@
+{
+    "application_name": "failures_test",
+    "email_address": "test@example.com",
+    "email_on_success": false,
+    "email_on_failure": false,
+    "env_variables": {
+        "APP_ENV": "test",
+        "LOG_LEVEL": "debug"
+    },
+    "jobs": [
+        {
+            "id": "success_job1",
+            "description": "First successful job",
+            "command": "python3 /home/sjoshi/claudelab/maestro/test_scripts/success_script.py",
+            "timeout": 10,
+            "env_variables": {
+                "TEST_JOB": "success_job1"
+            }
+        },
+        {
+            "id": "failure_job1",
+            "description": "First failing job",
+            "command": "python3 /home/sjoshi/claudelab/maestro/test_scripts/failure_script.py",
+            "dependencies": ["success_job1"],
+            "timeout": 10,
+            "env_variables": {
+                "TEST_JOB": "failure_job1"
+            }
+        },
+        {
+            "id": "dependent_on_failed",
+            "description": "Job dependent on a failed job",
+            "command": "python3 /home/sjoshi/claudelab/maestro/test_scripts/success_script.py",
+            "dependencies": ["failure_job1"],
+            "timeout": 10,
+            "env_variables": {
+                "TEST_JOB": "dependent_on_failed"
+            }
+        },
+        {
+            "id": "success_job2",
+            "description": "Another successful job",
+            "command": "python3 /home/sjoshi/claudelab/maestro/test_scripts/success_script.py",
+            "timeout": 10,
+            "env_variables": {
+                "TEST_JOB": "success_job2"
+            }
+        },
+        {
+            "id": "timeout_job",
+            "description": "Job that times out",
+            "command": "python3 /home/sjoshi/claudelab/maestro/test_scripts/timeout_script.py",
+            "dependencies": ["success_job2"],
+            "timeout": 5,
+            "env_variables": {
+                "TEST_JOB": "timeout_job"
+            }
+        }
+    ]
+}

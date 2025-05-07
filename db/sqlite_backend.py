@@ -1,0 +1,213 @@
+import sqlite3
+import logging
+import sys
+import os
+import json
+from contextlib import contextmanager
+from config.loader import Config
+
+@contextmanager
+def db_connection():
+    """Context manager for database connections to ensure proper cleanup."""
+    conn = None
+    try:
+        conn = sqlite3.connect(str(Config.DB_FILE))
+        # Set a default busy timeout to prevent immediate errors when database is locked
+        conn.execute("PRAGMA busy_timeout = 3000")  # 3 seconds
+        yield conn
+    except sqlite3.Error as e:
+        logging.getLogger('executioner').error(f"Database error: {e}")
+        raise
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception as e:
+                logging.getLogger('executioner').error(f"Error closing database connection: {e}")
+
+def init_db():
+    """Initialize the SQLite database with enhanced schema versioning and migration support."""
+    import hashlib  # Import for creating migration hashes
+    # Ensure the directory for the database exists
+    db_dir = os.path.dirname(os.path.abspath(Config.DB_FILE))
+    os.makedirs(db_dir, exist_ok=True)
+    print(f"Initializing database at {Config.DB_FILE}")
+    db_exists = os.path.exists(Config.DB_FILE)
+    if db_exists:
+        try:
+            with db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='schema_version'")
+                if cursor.fetchone():
+                    cursor.execute("SELECT MAX(version) FROM schema_version")
+                    version = cursor.fetchone()[0]
+                    if version is not None:
+                        print(f"Database already initialized (schema version {version})")
+                        return
+        except sqlite3.Error:
+            pass
+    try:
+        with db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("PRAGMA busy_timeout = 5000")
+            cursor.execute("PRAGMA foreign_keys = ON")
+            cursor.execute("BEGIN IMMEDIATE TRANSACTION")
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS db_init_lock (
+                    id INTEGER PRIMARY KEY,
+                    locked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    locked_by TEXT,
+                    process_id INTEGER
+                )
+            """)
+            cursor.execute("""
+                INSERT OR REPLACE INTO db_init_lock (id, locked_by, process_id)
+                VALUES (1, ?, ?)
+            """, ("executioner-init", os.getpid()))
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS schema_version (
+                    version INTEGER PRIMARY KEY,
+                    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    description TEXT,
+                    migration_hash TEXT,
+                    script_name TEXT,
+                    rollback_info TEXT
+                )
+            """)
+            cursor.execute("SELECT MAX(version) FROM schema_version")
+            row = cursor.fetchone()
+            current_version = row[0] if row[0] is not None else 0
+            migrations = [
+                (1, "Initial schema", [
+                    """
+                    CREATE TABLE IF NOT EXISTS job_history (
+                        run_id INTEGER,
+                        id TEXT,
+                        description TEXT,
+                        command TEXT,
+                        status TEXT,
+                        application_name TEXT,
+                        last_run TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        PRIMARY KEY (run_id, id)
+                    )
+                    """,
+                    "CREATE INDEX IF NOT EXISTS idx_job_history_run_id ON job_history (run_id)",
+                    "CREATE INDEX IF NOT EXISTS idx_job_history_status ON job_history (status)"
+                ], None, """
+                DROP TABLE IF EXISTS job_history;
+                """),
+                (2, "Add retry tracking", [
+                    "ALTER TABLE job_history ADD COLUMN retry_count INTEGER DEFAULT 0",
+                    "ALTER TABLE job_history ADD COLUMN last_error TEXT",
+                    "ALTER TABLE job_history ADD COLUMN retry_history TEXT"
+                ], None, """
+                -- SQLite doesn't support DROP COLUMN, but here's the rollback info
+                -- CREATE TABLE backup AS SELECT run_id, id, description, command, status, application_name, last_run FROM job_history;
+                -- DROP TABLE job_history;
+                -- CREATE TABLE job_history AS SELECT * FROM backup;
+                -- DROP TABLE backup;
+                """),
+                (3, "Add execution metrics", [
+                    "ALTER TABLE job_history ADD COLUMN duration_seconds REAL",
+                    "ALTER TABLE job_history ADD COLUMN memory_usage_mb REAL",
+                    "ALTER TABLE job_history ADD COLUMN cpu_usage_percent REAL"
+                ], None, """
+                -- SQLite doesn't support DROP COLUMN, but here's the rollback info
+                -- CREATE TABLE backup AS SELECT run_id, id, description, command, status, application_name, last_run, retry_count, last_error FROM job_history;
+                -- DROP TABLE job_history;
+                -- CREATE TABLE job_history AS SELECT * FROM backup;
+                -- DROP TABLE backup;
+                """),
+                (4, "Add migration history tracking", [
+                    """
+                    CREATE TABLE IF NOT EXISTS migration_history (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        version_from INTEGER,
+                        version_to INTEGER,
+                        migration_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        status TEXT,
+                        error_message TEXT
+                    )
+                    """
+                ], None, "DROP TABLE IF EXISTS migration_history;")
+            ]
+            migration_id = None
+            if current_version < len(migrations):
+                try:
+                    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='migration_history'")
+                    if cursor.fetchone():
+                        cursor.execute(
+                            "INSERT INTO migration_history (version_from, version_to, status) VALUES (?, ?, ?)",
+                            (current_version, len(migrations), "IN_PROGRESS")
+                        )
+                        conn.commit()
+                        cursor.execute("SELECT last_insert_rowid()")
+                        migration_id = cursor.fetchone()[0]
+                except sqlite3.Error as e:
+                    print(f"Warning: Could not record migration start: {e}")
+            try:
+                for version, description, statements, data_migration, rollback in migrations:
+                    if version > current_version:
+                        print(f"Applying database migration v{version}: {description}")
+                        migration_hash = hashlib.md5(str(statements).encode()).hexdigest()
+                        for statement in statements:
+                            try:
+                                cursor.execute(statement)
+                            except sqlite3.OperationalError as e:
+                                if "duplicate column name" not in str(e):
+                                    if migration_id:
+                                        error_msg = f"Migration v{version} failed: {e}"
+                                        try:
+                                            cursor.execute(
+                                                "UPDATE migration_history SET status = ?, error_message = ? WHERE id = ?",
+                                                ("FAILED", error_msg, migration_id)
+                                            )
+                                            conn.commit()
+                                        except:
+                                            pass
+                                    raise
+                        if data_migration:
+                            data_migration(conn, cursor)
+                        cursor.execute(
+                            """
+                            INSERT INTO schema_version 
+                            (version, description, migration_hash, script_name, rollback_info) 
+                            VALUES (?, ?, ?, ?, ?)
+                            """,
+                            (version, description, migration_hash, f"migration_v{version}", rollback)
+                        )
+                        conn.commit()
+                if migration_id:
+                    cursor.execute(
+                        "UPDATE migration_history SET status = ? WHERE id = ?",
+                        ("COMPLETED", migration_id)
+                    )
+                    conn.commit()
+            except Exception as e:
+                if migration_id:
+                    try:
+                        cursor.execute(
+                            "UPDATE migration_history SET status = ?, error_message = ? WHERE id = ?",
+                            ("FAILED", str(e), migration_id)
+                        )
+                        conn.commit()
+                    except:
+                        pass
+                raise
+            conn.commit()
+            cursor.execute("SELECT MAX(version) FROM schema_version")
+            row = cursor.fetchone()
+            final_version = row[0] if row[0] is not None else 0
+            if final_version > current_version:
+                print(f"Database migrated from version {current_version} to {final_version}")
+            else:
+                print(f"Database schema is up to date (version {final_version})")
+            print(f"Database initialization completed successfully")
+    except sqlite3.Error as e:
+        try:
+            if 'conn' in locals() and conn:
+                conn.rollback()
+        except:
+            pass
+        print(f"Database initialization error: {e}")
+        sys.exit(1) 
