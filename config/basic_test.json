@@ -13,6 +13,7 @@
             "description": "First basic job",
             "command": "python3 /home/sjoshi/claudelab/executioner/test_scripts/success_script.py",
             "timeout": 10,
+            "dependencies": ["job4"],
             "env_variables": {
                 "TEST_JOB": "job1",
                 "TEST_PARAM": "value1"
@@ -39,6 +40,12 @@
                 "TEST_JOB": "job3",
                 "TEST_PARAM": "value3"
             }
+        },
+	{
+            "id": "job4",
+            "description": "Third job depending on second job",
+            "command": "python3 /home/sjoshi/claudelab/executioner/test_scripts/success_script.py",
+            "timeout": 10
         }
     ]
 }

@@ -6,6 +6,7 @@ import subprocess
 from queue import Queue, Empty
 from typing import Dict, Any, Tuple
 from jobs.checks import CHECK_REGISTRY
+from jobs.check_executor import run_checks
 
 class JobRunner:
     def __init__(self, job_id: str, job_config: dict, global_env: dict, main_logger, config: dict, run_id: int, app_name: str, db_connection, validate_timeout, update_job_status, update_retry_history, get_last_exit_code, setup_job_logger):
@@ -72,39 +73,13 @@ class JobRunner:
             # Pre-checks
             pre_checks = self.job.get("pre_checks", [])
             if pre_checks:
-                for check in pre_checks:
-                    name = check["name"]
-                    params = check.get("params", {})
-                    func = CHECK_REGISTRY.get(name)
-                    args_str = ', '.join(f"{k}={v}" for k, v in params.items())
-                    if not func:
-                        msg = f"Job {self.job_id} pre_check: {name}({args_str}) - failed (unknown check)"
-                        self.main_logger.error(msg)
-                        self.update_job_status(self.job_id, "PRECHECK_FAILED")
-                        fail_reason = f"Pre-check failed: {name} (unknown check)"
-                        if return_reason:
-                            return False, fail_reason
-                        return False
-                    try:
-                        result = func(**params)
-                        status = "passed" if result else "failed"
-                        msg = f"Job {self.job_id} pre_check: {name}({args_str}) - {status}"
-                        self.main_logger.info(msg)
-                        if not result:
-                            self.main_logger.error(f"Pre-checks failed for job {self.job_id}. Skipping job execution.")
-                            self.update_job_status(self.job_id, "PRECHECK_FAILED")
-                            fail_reason = f"Pre-check failed: {name}"
-                            if return_reason:
-                                return False, fail_reason
-                            return False
-                    except Exception as e:
-                        msg = f"Job {self.job_id} pre_check: {name}({args_str}) - failed (error: {e})"
-                        self.main_logger.error(msg)
-                        self.update_job_status(self.job_id, "PRECHECK_FAILED")
-                        fail_reason = f"Pre-check error: {name} ({e})"
-                        if return_reason:
-                            return False, fail_reason
-                        return False
+                if not run_checks(pre_checks, job_logger, phase="pre", job_id=self.job_id):
+                    self.main_logger.error(f"Pre-checks failed for job {self.job_id}. Skipping job execution.")
+                    self.update_job_status(self.job_id, "PRECHECK_FAILED")
+                    fail_reason = f"Pre-check failed"
+                    if return_reason:
+                        return False, fail_reason
+                    return False
             attempt = 1
             start_time = time.time()
             total_retry_time = 0
@@ -135,38 +110,16 @@ class JobRunner:
                 if status == "SUCCESS":
                     # Post-checks
                     post_checks = self.job.get("post_checks", [])
-                    post_failed = False
                     if post_checks:
-                        for check in post_checks:
-                            name = check["name"]
-                            params = check.get("params", {})
-                            func = CHECK_REGISTRY.get(name)
-                            args_str = ', '.join(f"{k}={v}" for k, v in params.items())
-                            if not func:
-                                msg = f"Job {self.job_id} post_check: {name}({args_str}) - failed (unknown check)"
-                                self.main_logger.error(msg)
-                                post_failed = True
-                                continue
-                            try:
-                                result = func(**params)
-                                status_msg = "passed" if result else "failed"
-                                msg = f"Job {self.job_id} post_check: {name}({args_str}) - {status_msg}"
-                                self.main_logger.info(msg)
-                                if not result:
-                                    post_failed = True
-                            except Exception as e:
-                                msg = f"Job {self.job_id} post_check: {name}({args_str}) - failed (error: {e})"
-                                self.main_logger.error(msg)
-                                post_failed = True
-                    if post_failed:
-                        msg = f"Job {self.job_id} failed after {duration:.2f} seconds."
-                        self.main_logger.error(msg)
-                        fail_reason = "Post-check failed"
-                        if not continue_on_error:
-                            self.main_logger.error("Stopping execution.")
-                        if return_reason:
-                            return False, fail_reason
-                        return False
+                        if not run_checks(post_checks, job_logger, phase="post", job_id=self.job_id):
+                            msg = f"Job {self.job_id} failed after {duration:.2f} seconds."
+                            self.main_logger.error(msg)
+                            fail_reason = "Post-check failed"
+                            if not continue_on_error:
+                                self.main_logger.error("Stopping execution.")
+                            if return_reason:
+                                return False, fail_reason
+                            return False
                     msg = f"Job '{self.job_id}' completed successfully in {duration:.2f} seconds"
                     self.main_logger.info(msg)
                     self.update_job_status(self.job_id, "SUCCESS")

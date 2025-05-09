@@ -29,6 +29,7 @@ from db.sqlite_backend import db_connection
 from config.validator import validate_config
 from jobs.checks import CHECK_REGISTRY  # Ensure visibility in all contexts
 from jobs.job_runner import JobRunner
+from jobs.logger_factory import setup_logging
 
 class JobExecutioner:
     def __init__(self, config_file: str):
@@ -72,7 +73,7 @@ class JobExecutioner:
         self.end_time = None
         
         # Setup logging (now run_id is available)
-        self._setup_logging()
+        self.logger = setup_logging(self.application_name, self.run_id)
         
         # Validate configuration schema
         validate_config(self.config, self.logger)
@@ -193,50 +194,6 @@ class JobExecutioner:
                     self.logger.error(f"Error loading dependency plugin {plugin_path}: {e}")
         except Exception as e:
             self.logger.error(f"General error in dependency plugin loading: {e}")
-
-    def _setup_logging(self):
-        """Configure logging with rotation, console output, and JSON log output."""
-        self.master_log_path = os.path.join(Config.LOG_DIR, f"executioner.{self.application_name}.run-{self.run_id}.log")
-        master_log_path = self.master_log_path
-        app_log_path = os.path.join(Config.LOG_DIR, f"executioner.{self.application_name}.log")
-        file_handler = logging.FileHandler(master_log_path)
-        app_file_handler = RotatingFileHandler(app_log_path, maxBytes=Config.MAX_LOG_SIZE, backupCount=Config.BACKUP_LOG_COUNT)
-        console_handler = logging.StreamHandler(sys.stdout)
-        detailed_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-        summary_formatter = logging.Formatter('%(asctime)s - %(levelname)s - [RUN #%(run_id)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-        file_handler.setFormatter(detailed_formatter)
-        app_file_handler.setFormatter(summary_formatter)
-
-        # Custom formatter for coloring ERROR in red on console and appending log file path
-        class ColorFormatter(logging.Formatter):
-            RED = '\033[31m'
-            RESET = '\033[0m'
-            def __init__(self, *args, **kwargs):
-                # Remove log_file_path logic
-                super().__init__(*args, **kwargs)
-            def format(self, record):
-                levelname = record.levelname
-                if levelname == 'ERROR':
-                    record.levelname = f"{self.RED}{levelname}{self.RESET}"
-                result = super().format(record)
-                record.levelname = levelname  # Restore for other handlers
-                return result
-        color_formatter = ColorFormatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-        console_handler.setFormatter(color_formatter)
-
-        old_factory = logging.getLogRecordFactory()
-        def record_factory(*args, **kwargs):
-            record = old_factory(*args, **kwargs)
-            record.run_id = self.run_id
-            record.application_name = self.application_name
-            return record
-        logging.setLogRecordFactory(record_factory)
-        self.logger = logging.getLogger('executioner')
-        for handler in self.logger.handlers[:]:
-            self.logger.removeHandler(handler)
-        self.logger.addHandler(file_handler)
-        self.logger.addHandler(app_file_handler)
-        self.logger.addHandler(console_handler)
 
     def _get_new_run_id(self) -> int:
         try:
@@ -659,7 +616,7 @@ class JobExecutioner:
         except OSError as e:
             job_logger.error(f"Error killing process: {e}")
 
-    def _execute_job(self, job_id: str, return_reason: bool = False):
+    def _execute_job(self, job_id: str, return_reason: bool = True):
         job = self.jobs[job_id]
         runner = JobRunner(
             job_id=job_id,
@@ -677,9 +634,7 @@ class JobExecutioner:
             setup_job_logger=self._setup_job_logger
         )
         result, fail_reason = runner.run(dry_run=self.dry_run, continue_on_error=self.continue_on_error, return_reason=True)
-        if return_reason:
-            return result, fail_reason
-        return result
+        return result, fail_reason
 
     def _run_dry(self, resume_run_id=None, resume_failed_only=False):
         self.logger.info(f"Starting dry run - printing execution plan")
@@ -748,8 +703,10 @@ class JobExecutioner:
         print(f"{divider}")
         print(f"{Config.COLOR_CYAN}Application:{Config.COLOR_RESET} {self.application_name}")
         print(f"{Config.COLOR_CYAN}Run ID:{Config.COLOR_RESET} {self.run_id}")
-        print(f"{Config.COLOR_CYAN}Start Time:{Config.COLOR_RESET} {self.start_time.strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"{Config.COLOR_CYAN}End Time:{Config.COLOR_RESET} {end_date}")
+        start_time_str = self.start_time.strftime('%Y-%m-%d %H:%M:%S') if self.start_time else "N/A"
+        end_time_str = self.end_time.strftime('%Y-%m-%d %H:%M:%S')
+        print(f"{Config.COLOR_CYAN}Start Time:{Config.COLOR_RESET} {start_time_str}")
+        print(f"{Config.COLOR_CYAN}End Time:{Config.COLOR_RESET} {end_time_str}")
         print(f"{Config.COLOR_CYAN}Duration:{Config.COLOR_RESET} {duration_str}")
         print(f"{Config.COLOR_CYAN}Total Jobs:{Config.COLOR_RESET} {len(self.jobs)}")
         print(f"{Config.COLOR_CYAN}Would Execute:{Config.COLOR_RESET} {Config.COLOR_DARK_GREEN}{len(self.jobs) - len(self.skip_jobs)}{Config.COLOR_RESET}")
@@ -924,8 +881,10 @@ class JobExecutioner:
         print(f"{Config.COLOR_CYAN}Application:{Config.COLOR_RESET} {self.application_name}")
         print(f"{Config.COLOR_CYAN}Run ID:{Config.COLOR_RESET} {self.run_id}")
         print(f"{Config.COLOR_CYAN}Status:{Config.COLOR_RESET} {Config.COLOR_RED}{status}{Config.COLOR_RESET}")
-        print(f"{Config.COLOR_CYAN}Start Time:{Config.COLOR_RESET} {self.start_time.strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"{Config.COLOR_CYAN}End Time:{Config.COLOR_RESET} {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        start_time_str = self.start_time.strftime('%Y-%m-%d %H:%M:%S') if self.start_time else "N/A"
+        end_time_str = self.end_time.strftime('%Y-%m-%d %H:%M:%S') if self.end_time else "N/A"
+        print(f"{Config.COLOR_CYAN}Start Time:{Config.COLOR_RESET} {start_time_str}")
+        print(f"{Config.COLOR_CYAN}End Time:{Config.COLOR_RESET} {end_time_str}")
         print(f"{Config.COLOR_CYAN}Duration:{Config.COLOR_RESET} 0:00:00")
         print(f"{Config.COLOR_CYAN}Jobs Completed:{Config.COLOR_RESET} 0")
         print(f"{Config.COLOR_CYAN}Jobs Failed:{Config.COLOR_RESET} 0")
@@ -1002,7 +961,7 @@ class JobExecutioner:
                 self.failed_job_reasons[job_id] = f"Missing dependencies: {', '.join(missing_deps)}"
                 self.exit_code = 1
                 break
-            job_success, fail_reason = self._execute_job(job_id, return_reason=True)
+            job_success, fail_reason = self._execute_job(job_id)
             if self.interrupted:
                 self.logger.info("Execution interrupted, stopping gracefully.")
                 break
@@ -1216,38 +1175,6 @@ class JobExecutioner:
                 self.logger.debug(f"Queued dependent job: {job_id}")
             with self.job_completed_condition:
                 self.job_completed_condition.notify_all()
-
-    def _run_checks(self, checks, job_logger, phase="pre", job_id=None):
-        from jobs.checks import CHECK_REGISTRY  # Ensure visibility in all contexts
-        import datetime
-        for check in checks:
-            name = check["name"]
-            params = check.get("params", {})
-            now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            check_type = f"{phase}_check"
-            args_str = ', '.join(f"{k}={v}" for k, v in params.items())
-            func = CHECK_REGISTRY.get(name)
-            if not func:
-                result_str = f"{now} - INFO - Job {job_id} {check_type}: {name}({args_str}) - failed (unknown check)"
-                print(result_str)
-                job_logger.error(f"Unknown {phase}-check: {name}")
-                return False
-            try:
-                result = func(**params)
-                status = "passed" if result else "failed"
-                result_str = f"{now} - INFO - Job {job_id} {check_type}: {name}({args_str}) - {status}"
-                print(result_str)
-                if result:
-                    job_logger.info(f"{phase.capitalize()}-check passed: {name}")
-                else:
-                    job_logger.error(f"{phase.capitalize()}-check failed: {name}")
-                    return False
-            except Exception as e:
-                result_str = f"{now} - INFO - Job {job_id} {check_type}: {name}({args_str}) - failed (error: {e})"
-                print(result_str)
-                job_logger.error(f"Error running {phase}-check {name}: {e}")
-                return False
-        return True
 
     def _get_job_status(self, job_id: str) -> str:
         if self.dry_run:
