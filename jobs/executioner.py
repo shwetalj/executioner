@@ -7,6 +7,7 @@ import sys
 import datetime
 import os
 import re
+
 import smtplib
 import socket
 import time
@@ -125,7 +126,7 @@ class JobExecutioner:
         if self.dependency_manager.has_circular_dependencies():
             self.logger.error("Circular dependencies detected in job configuration")
             print(f"{Config.COLOR_RED}ERROR: Circular dependencies detected{Config.COLOR_RESET}")
-            return 1
+            sys.exit(1)
 
         missing_deps = self.dependency_manager.check_missing_dependencies()
         if missing_deps:
@@ -591,7 +592,7 @@ class JobExecutioner:
         if self.dependency_manager.has_circular_dependencies():
             self.logger.error("Circular dependencies detected in job configuration")
             print(f"{Config.COLOR_RED}ERROR: Circular dependencies detected{Config.COLOR_RESET}")
-            return 1
+            sys.exit(1)
         missing_dependencies = self.dependency_manager.check_missing_dependencies()
         if missing_dependencies:
             for job_id, missing_deps in missing_dependencies.items():

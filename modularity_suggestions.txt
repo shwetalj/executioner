@@ -3,38 +3,34 @@ Modularity Suggestions for Job Execution Engine
 
 Below are opportunities for further modularization in your current architecture:
 
-1. Dependency Management
-   - Current: Dependency resolution, cycle detection, and plugin loading are handled directly in JobExecutioner.
-   - Modular Option: Extract a DependencyManager class for all dependency logic.
+1. Environment Variable Management
+   - Current: Environment variable merging and validation is handled inline in job execution.
+   - Modular Option: Extract an EnvManager or utility function for this purpose.
 
 2. Notification System
    - Current: Email notification logic is in JobExecutioner.
    - Modular Option: Move all notification logic to a NotificationManager class.
 
-3. Environment Variable Management
-   - Current: Environment variable merging and validation is handled inline in job execution.
-   - Modular Option: Extract an EnvManager or utility function for this purpose.
-
-4. Command Validation & Security
+3. Command Validation & Security
    - Current: Command validation logic is in JobExecutioner._validate_command.
    - Modular Option: Move to a CommandValidator class or module.
 
-5. Job Queue & Scheduling
+4. Job Queue & Scheduling
    - Current: Job queueing and scheduling logic is in JobExecutioner.
    - Modular Option: Extract a JobScheduler class.
 
-6. Configuration Loading & Validation
+5. Configuration Loading & Validation
    - Current: Some config loading/validation is in JobExecutioner, some in config/loader.py and config/validator.py.
    - Modular Option: Centralize all config logic in a ConfigManager class.
 
-7. Job Execution Logic
+6. Job Execution Logic
     - Current: JobRunner is already a good abstraction, but could be further split (command execution, retry logic, output streaming, timeout handling).
 
-8. Output Formatting
+7. Output Formatting
     - Current: Color and summary formatting is handled inline.
     - Modular Option: Move to a Formatter or SummaryPrinter class.
 
-9. Testing Utilities
+8. Testing Utilities
     - Current: Test scripts are in the repo, but test harness logic could be modularized for automated testing.
 
 Summary Table
@@ -42,9 +38,8 @@ Summary Table
 
 | Concern                | Current Location         | Modular Option                |
 |------------------------|-------------------------|-------------------------------|
-| Dependency Mgmt        | JobExecutioner          | DependencyManager             |
-| Notification           | JobExecutioner          | NotificationManager           |
 | Env Vars               | Inline                  | EnvManager                    |
+| Notification           | JobExecutioner          | NotificationManager           |
 | Command Validation     | JobExecutioner          | CommandValidator              |
 | Job Queue/Scheduling   | JobExecutioner          | JobScheduler                  |
 | Config                 | JobExecutioner/loader   | ConfigManager                 |
@@ -54,7 +49,7 @@ Summary Table
 
 How to Proceed
 --------------
-- Pick one area (e.g., dependency management, etc.) to modularize next.
+- Pick one area (e.g., environment variable management, etc.) to modularize next.
 - Design and implement the new module/class, and refactor the code accordingly.
 
 If you want a more detailed plan for a specific area, just ask! 
