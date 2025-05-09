@@ -25,7 +25,24 @@ class JobRunner:
 
     def run(self, dry_run=False):
         command = self.job["command"]
-        timeout = self.job.get("timeout", self.config.get("DEFAULT_TIMEOUT", 600))
+        # Determine timeout: job['timeout'] > config['default_timeout'] > 600
+        timeout = self.job.get("timeout")
+        timeout_source = None
+        if timeout is not None:
+            timeout_source = f"timeout={timeout}"
+        else:
+            timeout = self.config.get("default_timeout")
+            if timeout is not None:
+                timeout_source = f"default timeout={timeout}"
+        if timeout is None:
+            timeout = 600
+            timeout_source = "default timeout=600"
+        else:
+            try:
+                timeout = int(timeout)
+            except Exception:
+                timeout = 600
+                timeout_source = "default timeout=600"
         max_retries = self.job.get("max_retries", self.config.get("default_max_retries", 0))
         retry_delay = self.job.get("retry_delay", self.config.get("default_retry_delay", 30))
         retry_backoff = self.job.get("retry_backoff", self.config.get("default_retry_backoff", 1.5))
@@ -42,6 +59,10 @@ class JobRunner:
             self.main_logger.info(f"Running job: {self.job_id} Command: {command}")
             if dry_run:
                 print(f"[DRY RUN] Would execute job: {self.job_id} - Command: {command[:60]}{'...' if len(command) > 60 else ''}")
+                return True
+            if not command.strip():
+                self.main_logger.info(f"Job {self.job_id}: SUCCESS (empty command)")
+                self.update_job_status(self.job_id, "SUCCESS")
                 return True
             # Pre-checks
             pre_checks = self.job.get("pre_checks", [])
@@ -83,23 +104,19 @@ class JobRunner:
                 attempt_start = time.time()
                 exit_code = None
                 try:
-                    success = self._run_command(command, timeout, job_logger)
-                    duration = round(time.time() - attempt_start, 2)
-                    try:
-                        exit_code = self.get_last_exit_code(self.job_id)
-                    except:
-                        pass
+                    status = self._run_command(command, timeout, job_logger)
                 except Exception as e:
-                    success = False
+                    status = "ERROR"
+                    job_logger.error(f"Exception during job execution: {e}")
                 attempt_info = {
                     "attempt": attempt,
                     "timestamp": datetime.datetime.now().isoformat(),
-                    "duration": duration if 'duration' in locals() else None,
-                    "success": success,
+                    "duration": round(time.time() - attempt_start, 2) if 'duration' in locals() else None,
+                    "success": status == "SUCCESS",
                     "exit_code": exit_code
                 }
                 retry_history.append(attempt_info)
-                if success:
+                if status == "SUCCESS":
                     # Post-checks
                     post_checks = self.job.get("post_checks", [])
                     post_failed = False
@@ -116,8 +133,8 @@ class JobRunner:
                                 continue
                             try:
                                 result = func(**params)
-                                status = "passed" if result else "failed"
-                                msg = f"Job {self.job_id} post_check: {name}({args_str}) - {status}"
+                                status_msg = "passed" if result else "failed"
+                                msg = f"Job {self.job_id} post_check: {name}({args_str}) - {status_msg}"
                                 self.main_logger.info(msg)
                                 if not result:
                                     post_failed = True
@@ -129,11 +146,14 @@ class JobRunner:
                         msg = f"Job {self.job_id} failed. Stopping execution."
                         self.main_logger.error(msg)
                         return False
-                    # Job completed successfully
-                    msg = f"Job '{self.job_id}' completed successfully in {duration:.2f} seconds"
+                    duration_val = attempt_info['duration'] if attempt_info['duration'] is not None else 0.0
+                    msg = f"Job '{self.job_id}' completed successfully in {duration_val:.2f} seconds"
                     self.main_logger.info(msg)
                     self.update_job_status(self.job_id, "SUCCESS")
                     return True
+                if status == "TIMEOUT":
+                    # Timeout already logged, do not log generic failure
+                    return False
                 should_retry = False
                 last_status = "FAILED"
                 if current_retry < max_retries:
@@ -163,7 +183,7 @@ class JobRunner:
             job_file_handler.close()
 
     def _run_command(self, command, timeout, job_logger):
-        # Simplified: just run the command, handle timeout, log output
+        import threading
         env = os.environ.copy()
         env.update({k: str(v) for k, v in self.global_env.items()})
         env.update({k: str(v) for k, v in self.job.get("env_variables", {}).items()})
@@ -177,26 +197,54 @@ class JobRunner:
             env=env,
             preexec_fn=os.setsid if 'posix' in os.name else None
         )
+        output_lines = []
+        stop_reading = threading.Event()
+        def read_output():
+            try:
+                for line in process.stdout:
+                    if stop_reading.is_set():
+                        break
+                    job_logger.info(line.rstrip())
+                    output_lines.append(line.rstrip())
+            except Exception as e:
+                job_logger.error(f"Error reading process output: {e}")
+        reader_thread = threading.Thread(target=read_output, daemon=True)
+        reader_thread.start()
         try:
-            for line in process.stdout:
-                job_logger.info(line.rstrip())
-            exit_code = process.wait(timeout=timeout)
+            try:
+                exit_code = process.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                timeout_val = getattr(self, 'timeout', timeout)
+                timeout_source = getattr(self, 'timeout_source', f"timeout={timeout}")
+                msg = f"Job {self.job_id} timed out after {timeout} seconds ({timeout_source})."
+                job_logger.error(msg)
+                self.main_logger.error(msg)
+                try:
+                    if 'posix' in os.name:
+                        import signal
+                        os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+                    else:
+                        process.terminate()
+                except Exception as e:
+                    job_logger.error(f"Error terminating process on timeout: {e}")
+                stop_reading.set()
+                reader_thread.join(timeout=2)
+                self.update_job_status(self.job_id, "TIMEOUT")
+                return "TIMEOUT"
+            stop_reading.set()
+            reader_thread.join(timeout=2)
             if exit_code == 0:
                 job_logger.info(f"Job {self.job_id}: SUCCESS")
                 self.update_job_status(self.job_id, "SUCCESS")
-                return True
+                return "SUCCESS"
             else:
                 job_logger.error(f"Job {self.job_id}: FAILED with exit code {exit_code}")
                 self.update_job_status(self.job_id, "FAILED")
-                return False
-        except subprocess.TimeoutExpired:
-            job_logger.error(f"Job {self.job_id}: TIMEOUT after {timeout} seconds")
-            self.update_job_status(self.job_id, "TIMEOUT")
-            return False
+                return "FAILED"
         except Exception as e:
             job_logger.error(f"Exception during command execution: {e}")
             self.update_job_status(self.job_id, "ERROR")
-            return False
+            return "ERROR"
         finally:
             if process and process.stdout:
                 process.stdout.close()

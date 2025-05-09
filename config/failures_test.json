@@ -1,5 +1,6 @@
 {
     "application_name": "failures_test",
+    "default_timeout": 2,
     "email_address": "test@example.com",
     "email_on_success": false,
     "email_on_failure": false,
@@ -11,7 +12,7 @@
         {
             "id": "success_job1",
             "description": "First successful job",
-            "command": "python3 /home/sjoshi/claudelab/executioner/test_scripts/success_script.py",
+            "command": "python3 /home/sjoshi/claudelab/executioner/test_scripts/success_script.py 10",
             "timeout": 10,
             "env_variables": {
                 "TEST_JOB": "success_job1"
@@ -20,7 +21,7 @@
         {
             "id": "failure_job1",
             "description": "First failing job",
-            "command": "python3 /home/sjoshi/claudelab/executioner/test_scripts/failure_script.py",
+            "command": "python3 /home/sjoshi/claudelab/executioner/test_scripts/failure_script.py 20",
             "dependencies": ["success_job1"],
             "timeout": 10,
             "env_variables": {
@@ -51,7 +52,6 @@
             "description": "Job that times out",
             "command": "python3 /home/sjoshi/claudelab/executioner/test_scripts/timeout_script.py",
             "dependencies": ["success_job2"],
-            "timeout": 5,
             "env_variables": {
                 "TEST_JOB": "timeout_job"
             }

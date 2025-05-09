@@ -62,6 +62,7 @@ def parse_env_vars(env_list):
 
 SAMPLE_CONFIG = """{
     "application_name": "data_pipeline",
+    "default_timeout": 3600,
     "email_address": "alerts@example.com",
     "email_on_success": true,
     "email_on_failure": true,
