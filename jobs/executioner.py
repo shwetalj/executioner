@@ -137,6 +137,8 @@ class JobExecutioner:
                 self.logger.warning(f"Job {job_id} references dependencies that don't exist: {', '.join(missing)}")
             self.logger.warning("Missing dependencies found. Use --continue-on-error to run anyway.")
 
+        self.job_log_paths = {}  # Track job log file paths
+
     def _validate_config(self):
         """Validate configuration against a basic schema."""
         if "jobs" not in self.config or not isinstance(self.config["jobs"], list):
@@ -192,7 +194,8 @@ class JobExecutioner:
 
     def _setup_logging(self):
         """Configure logging with rotation and console output."""
-        master_log_path = os.path.join(Config.LOG_DIR, f"executioner.{self.application_name}.run-{self.run_id}.log")
+        self.master_log_path = os.path.join(Config.LOG_DIR, f"executioner.{self.application_name}.run-{self.run_id}.log")
+        master_log_path = self.master_log_path
         app_log_path = os.path.join(Config.LOG_DIR, f"executioner.{self.application_name}.log")
         file_handler = logging.FileHandler(master_log_path)
         app_file_handler = RotatingFileHandler(app_log_path, maxBytes=Config.MAX_LOG_SIZE, backupCount=Config.BACKUP_LOG_COUNT)
@@ -201,7 +204,24 @@ class JobExecutioner:
         summary_formatter = logging.Formatter('%(asctime)s - %(levelname)s - [RUN #%(run_id)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
         file_handler.setFormatter(detailed_formatter)
         app_file_handler.setFormatter(summary_formatter)
-        console_handler.setFormatter(detailed_formatter)
+
+        # Custom formatter for coloring ERROR in red on console and appending log file path
+        class ColorFormatter(logging.Formatter):
+            RED = '\033[31m'
+            RESET = '\033[0m'
+            def __init__(self, *args, **kwargs):
+                # Remove log_file_path logic
+                super().__init__(*args, **kwargs)
+            def format(self, record):
+                levelname = record.levelname
+                if levelname == 'ERROR':
+                    record.levelname = f"{self.RED}{levelname}{self.RESET}"
+                result = super().format(record)
+                record.levelname = levelname  # Restore for other handlers
+                return result
+        color_formatter = ColorFormatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+        console_handler.setFormatter(color_formatter)
+
         old_factory = logging.getLogRecordFactory()
         def record_factory(*args, **kwargs):
             record = old_factory(*args, **kwargs)
@@ -292,6 +312,7 @@ class JobExecutioner:
         job_command = self.jobs[job_id]['command']
         job_logger.info(f"Executing job - {job_id}: {job_command}")
         self.logger.info(f"Starting job '{job_id}'{': ' + job_description if job_description else ''}")
+        self.job_log_paths[job_id] = job_log_path  # Store the job log path
         return job_logger, job_file_handler, job_log_path
 
     def _validate_command(self, command: str, job_id: str, job_logger: logging.Logger) -> Tuple[bool, str]:
@@ -1651,7 +1672,9 @@ Skipped Jobs: {len(self.skip_jobs)}
                     self.failed_jobs.add(job_id)
                     self._mark_dependent_jobs_failed(job_id)
                     if not self.continue_on_error:
-                        self.logger.error(f"Job {job_id} failed. Stopping execution.")
+                        job_log_path = self.job_log_paths.get(job_id, None)
+                        extra = f" See log {job_log_path}" if job_log_path else ""
+                        self.logger.error(f"Job {job_id} failed. Stopping execution.{extra}")
                         self.exit_code = 1
                         break
                     self.logger.warning(f"Job {job_id} failed but continuing.")
@@ -1685,7 +1708,9 @@ Skipped Jobs: {len(self.skip_jobs)}
                                 self.failed_jobs.add(job_id)
                                 self._mark_dependent_jobs_failed(job_id)
                                 if not self.continue_on_error:
-                                    self.logger.error(f"Job {job_id} failed. Stopping.")
+                                    job_log_path = self.job_log_paths.get(job_id, None)
+                                    extra = f" See log {job_log_path}" if job_log_path else ""
+                                    self.logger.error(f"Job {job_id} failed. Stopping.{extra}")
                                     self.exit_code = 1
                                     self.interrupted = True
                                 else:
