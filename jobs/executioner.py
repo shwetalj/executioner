@@ -30,12 +30,12 @@ from config.validator import validate_config
 from jobs.checks import CHECK_REGISTRY  # Ensure visibility in all contexts
 from jobs.job_runner import JobRunner
 from jobs.logger_factory import setup_logging
+from jobs.job_history_manager import JobHistoryManager
 
 class JobExecutioner:
     def __init__(self, config_file: str):
         # Will be set up properly in _setup_logging
         self.logger = None
-        self.job_status_batch = []  # For batching database updates
 
         # Set up a basic logger first to handle early errors
         self.logger = logging.getLogger('executioner')
@@ -68,12 +68,11 @@ class JobExecutioner:
         self.continue_on_error = False
         self.dry_run = False
         self.skip_jobs: Set[str] = set()
-        self.run_id = self._get_new_run_id()
         self.start_time = None
         self.end_time = None
         
         # Setup logging (now run_id is available)
-        self.logger = setup_logging(self.application_name, self.run_id)
+        self.logger = setup_logging(self.application_name, None)
         
         # Validate configuration schema
         validate_config(self.config, self.logger)
@@ -142,6 +141,11 @@ class JobExecutioner:
 
         self.job_log_paths = {}  # Track job log file paths
 
+        # Initialize JobHistoryManager (run_id will be set after DB query)
+        self.job_history = JobHistoryManager(self.jobs, self.application_name, None, self.logger)
+        self.run_id = self.job_history.get_new_run_id()
+        self.job_history.run_id = self.run_id
+
     def _validate_config(self):
         """Validate configuration against a basic schema."""
         if "jobs" not in self.config or not isinstance(self.config["jobs"], list):
@@ -195,17 +199,6 @@ class JobExecutioner:
         except Exception as e:
             self.logger.error(f"General error in dependency plugin loading: {e}")
 
-    def _get_new_run_id(self) -> int:
-        try:
-            with db_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT MAX(CAST(run_id AS INTEGER)) FROM job_history")
-                last_run_id = cursor.fetchone()[0]
-                return (last_run_id + 1) if last_run_id is not None else 1
-        except (sqlite3.Error, ValueError, TypeError):
-            print("Warning: Could not determine last run_id from database, starting with run_id=1")
-            return 1
-
     def _get_previous_run_status(self, resume_run_id: int) -> Dict[str, str]:
         job_statuses = {}
         try:
@@ -224,36 +217,6 @@ class JobExecutioner:
         except sqlite3.Error as e:
             self.logger.error(f"Database error while getting previous run status: {e}")
             return {}
-
-    def _update_job_status(self, job_id: str, status: str):
-        if self.dry_run:
-            return
-        job = self.jobs[job_id]
-        self.job_status_batch.append((
-            self.run_id,
-            job_id,
-            job.get("description", ""),
-            job["command"],
-            status,
-            self.application_name
-        ))
-
-    def _commit_job_statuses(self):
-        if not self.job_status_batch:
-            return
-        try:
-            with db_connection() as conn:
-                cursor = conn.cursor()
-                cursor.executemany("""
-                    INSERT OR REPLACE INTO job_history
-                    (run_id, id, description, command, status, application_name)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, self.job_status_batch)
-                conn.commit()
-        except sqlite3.Error as e:
-            self.logger.error(f"Database batch update error: {e}")
-        finally:
-            self.job_status_batch.clear()
 
     def _setup_job_logger(self, job_id: str) -> Tuple[logging.Logger, logging.FileHandler, str]:
         job_log_path = os.path.join(Config.LOG_DIR, f"executioner.{self.application_name}.job-{job_id}.run-{self.run_id}.log")
@@ -411,7 +374,7 @@ class JobExecutioner:
                 error_msg = f"Command execution blocked by security policy: {reason}"
                 job_logger.error(error_msg)
                 print(f"{Config.COLOR_RED}{error_msg}{Config.COLOR_RESET}")
-                self._update_job_status(job_id, "BLOCKED")
+                self.job_history.update_job_status(job_id, "BLOCKED")
                 return False
             if reason:
                 warning = f"Command has potentially unsafe patterns but will be executed: {command}"
@@ -437,7 +400,7 @@ class JobExecutioner:
                 cmd_args = parsed_command.get('args', [])
                 if not cmd_args:
                     job_logger.error("Command parsing failed, no arguments to execute")
-                    self._update_job_status(job_id, "ERROR")
+                    self.job_history.update_job_status(job_id, "ERROR")
                     return False
                 job_logger.info(f"Executing command without shell: {' '.join(cmd_args)}")
                 process = subprocess.Popen(
@@ -453,7 +416,7 @@ class JobExecutioner:
             else:
                 if not self.allow_shell:
                     job_logger.error("Shell execution required but disabled by configuration (allow_shell=False)")
-                    self._update_job_status(job_id, "ERROR")
+                    self.job_history.update_job_status(job_id, "ERROR")
                     return False
                 shell_features_needed = parsed_command.get('needs_shell', True) if parsed_command else True
                 job_logger.warning(f"Using shell=True for command execution: {command}")
@@ -512,7 +475,7 @@ class JobExecutioner:
                 self._terminate_process(process, job_logger)
                 stop_event.set()
                 process_complete.set()
-                self._update_job_status(job_id, "TIMEOUT")
+                self.job_history.update_job_status(job_id, "TIMEOUT")
                 self.logger.error(f"Job '{job_id}' timed out after {timeout} seconds")
                 return False
             finally:
@@ -525,12 +488,12 @@ class JobExecutioner:
                     process.stdout.close()
             if process.returncode == 0:
                 job_logger.info(f"Job {job_id}: SUCCESS")
-                self._update_job_status(job_id, "SUCCESS")
+                self.job_history.update_job_status(job_id, "SUCCESS")
                 self.logger.info(f"Job '{job_id}' completed successfully")
                 return True
             else:
                 job_logger.error(f"Job {job_id}: FAILED with exit code {process.returncode}")
-                self._update_job_status(job_id, "FAILED")
+                self.job_history.update_job_status(job_id, "FAILED")
                 self.logger.error(f"Job '{job_id}' failed with exit code {process.returncode}")
                 return False
         except Exception as e:
@@ -538,7 +501,7 @@ class JobExecutioner:
             job_logger.error(error_msg)
             if process and process.poll() is None:
                 self._terminate_process(process, job_logger)
-            self._update_job_status(job_id, "ERROR")
+            self.job_history.update_job_status(job_id, "ERROR")
             self.logger.error(f"Job '{job_id}' failed with exception: {e}")
             return False
 
@@ -628,9 +591,9 @@ class JobExecutioner:
             app_name=self.application_name,
             db_connection=db_connection,
             validate_timeout=self._validate_timeout,
-            update_job_status=self._update_job_status,
-            update_retry_history=self._update_retry_history,
-            get_last_exit_code=self._get_last_exit_code,
+            update_job_status=self.job_history.update_job_status,
+            update_retry_history=self.job_history.update_retry_history,
+            get_last_exit_code=self.job_history.get_last_exit_code,
             setup_job_logger=self._setup_job_logger
         )
         result, fail_reason = runner.run(dry_run=self.dry_run, continue_on_error=self.continue_on_error, return_reason=True)
@@ -771,7 +734,7 @@ class JobExecutioner:
         print(f"{divider}")
         previous_job_statuses = {}
         if resume_run_id is not None:
-            previous_job_statuses = self._get_previous_run_status(resume_run_id)
+            previous_job_statuses = self.job_history.get_previous_run_status(resume_run_id)
             if not previous_job_statuses:
                 self.logger.error(f"No job history found for run ID {resume_run_id}. Starting fresh.")
             else:
@@ -821,7 +784,7 @@ class JobExecutioner:
                 self.logger.debug("Shutting down thread pool executor")
                 self.executor.shutdown(wait=True)
                 self.executor = None
-            self._commit_job_statuses()
+            self.job_history.commit_job_statuses()
         if iteration_count >= max_iter:
             self.logger.error(f"Reached maximum iteration limit ({max_iter}). Possible infinite loop detected.")
             self.exit_code = 1
@@ -1175,24 +1138,6 @@ class JobExecutioner:
                 self.logger.debug(f"Queued dependent job: {job_id}")
             with self.job_completed_condition:
                 self.job_completed_condition.notify_all()
-
-    def _get_job_status(self, job_id: str) -> str:
-        if self.dry_run:
-            return "UNKNOWN"
-        try:
-            with db_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "SELECT status FROM job_history WHERE run_id = ? AND id = ?",
-                    (self.run_id, job_id)
-                )
-                row = cursor.fetchone()
-                if row:
-                    return row[0]
-                return "UNKNOWN"
-        except sqlite3.Error as e:
-            self.logger.warning(f"Error retrieving job status: {e}")
-            return "UNKNOWN"
 
     def _update_retry_history(self, job_id: str, retry_history: list, retry_count: int, status: str, reason: str = None) -> None:
         try:

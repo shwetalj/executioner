@@ -3,46 +3,38 @@ Modularity Suggestions for Job Execution Engine
 
 Below are opportunities for further modularization in your current architecture:
 
-1. Job Status & History Management
-   - Current: Database logic for job status/history is embedded in JobExecutioner.
-   - Modular Option: Move all DB-related job status/history logic into a dedicated class, e.g., JobHistoryManager.
-
-2. Dependency Management
+1. Dependency Management
    - Current: Dependency resolution, cycle detection, and plugin loading are handled directly in JobExecutioner.
    - Modular Option: Extract a DependencyManager class for all dependency logic.
 
-3. Check Execution
-   - Current: Pre/post check logic is duplicated in both JobExecutioner and JobRunner.
-   - Modular Option: Extract a CheckExecutor utility/class for running checks.
-
-4. Notification System
+2. Notification System
    - Current: Email notification logic is in JobExecutioner.
    - Modular Option: Move all notification logic to a NotificationManager class.
 
-5. Environment Variable Management
+3. Environment Variable Management
    - Current: Environment variable merging and validation is handled inline in job execution.
    - Modular Option: Extract an EnvManager or utility function for this purpose.
 
-6. Command Validation & Security
+4. Command Validation & Security
    - Current: Command validation logic is in JobExecutioner._validate_command.
    - Modular Option: Move to a CommandValidator class or module.
 
-7. Job Queue & Scheduling
+5. Job Queue & Scheduling
    - Current: Job queueing and scheduling logic is in JobExecutioner.
    - Modular Option: Extract a JobScheduler class.
 
-8. Configuration Loading & Validation
+6. Configuration Loading & Validation
    - Current: Some config loading/validation is in JobExecutioner, some in config/loader.py and config/validator.py.
    - Modular Option: Centralize all config logic in a ConfigManager class.
 
-9. Job Execution Logic
+7. Job Execution Logic
     - Current: JobRunner is already a good abstraction, but could be further split (command execution, retry logic, output streaming, timeout handling).
 
-10. Output Formatting
+8. Output Formatting
     - Current: Color and summary formatting is handled inline.
     - Modular Option: Move to a Formatter or SummaryPrinter class.
 
-11. Testing Utilities
+9. Testing Utilities
     - Current: Test scripts are in the repo, but test harness logic could be modularized for automated testing.
 
 Summary Table
@@ -50,9 +42,7 @@ Summary Table
 
 | Concern                | Current Location         | Modular Option                |
 |------------------------|-------------------------|-------------------------------|
-| Job DB/History         | JobExecutioner          | JobHistoryManager             |
 | Dependency Mgmt        | JobExecutioner          | DependencyManager             |
-| Check Execution        | JobRunner/JobExecutioner| CheckExecutor                 |
 | Notification           | JobExecutioner          | NotificationManager           |
 | Env Vars               | Inline                  | EnvManager                    |
 | Command Validation     | JobExecutioner          | CommandValidator              |
@@ -64,7 +54,7 @@ Summary Table
 
 How to Proceed
 --------------
-- Pick one area (e.g., DB/history, dependency management, etc.) to modularize first.
+- Pick one area (e.g., dependency management, etc.) to modularize next.
 - Design and implement the new module/class, and refactor the code accordingly.
 
 If you want a more detailed plan for a specific area, just ask! 
