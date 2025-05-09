@@ -31,6 +31,7 @@ from jobs.checks import CHECK_REGISTRY  # Ensure visibility in all contexts
 from jobs.job_runner import JobRunner
 from jobs.logger_factory import setup_logging
 from jobs.job_history_manager import JobHistoryManager
+from jobs.dependency_manager import DependencyManager
 
 class JobExecutioner:
     def __init__(self, config_file: str):
@@ -99,20 +100,13 @@ class JobExecutioner:
         # Handle dependency plugins if specified
         self.dependency_plugins = self.config.get("dependency_plugins", [])
         
-        # Load dependency plugins now that logger is available
-        if self.dependency_plugins:
-            self.logger.info(f"Found {len(self.dependency_plugins)} dependency plugins to load")
-            self._load_dependency_plugins()
-
         # Job and dependency setup
         self.jobs: Dict[str, Dict] = {job["id"]: job for job in self.config["jobs"]}
         if len(self.jobs) != len(self.config["jobs"]):
             self.logger.error("Duplicate job IDs found in configuration")
             sys.exit(1)
-
-        self.dependencies: Dict[str, Set[str]] = {
-            job["id"]: frozenset(job.get("dependencies", [])) for job in self.config["jobs"]
-        }
+        self.dependency_manager = DependencyManager(self.jobs, self.logger, self.config.get("dependency_plugins", []))
+        self.dependencies = self.dependency_manager.dependencies
 
         # Threading primitives
         self.lock = threading.RLock()
@@ -128,12 +122,12 @@ class JobExecutioner:
         self.interrupted = False
 
         # Validate dependencies
-        has_circular = self._has_circular_dependencies()
-        if has_circular:
+        if self.dependency_manager.has_circular_dependencies():
             self.logger.error("Circular dependencies detected in job configuration")
-            sys.exit(1)
+            print(f"{Config.COLOR_RED}ERROR: Circular dependencies detected{Config.COLOR_RESET}")
+            return 1
 
-        missing_deps = self._check_missing_dependencies()
+        missing_deps = self.dependency_manager.check_missing_dependencies()
         if missing_deps:
             for job_id, missing in missing_deps.items():
                 self.logger.warning(f"Job {job_id} references dependencies that don't exist: {', '.join(missing)}")
@@ -171,33 +165,6 @@ class JobExecutioner:
             if "dependencies" in job and not isinstance(job["dependencies"], list):
                 self.logger.error(f"Job '{job['id']}' has invalid dependencies")
                 sys.exit(1)
-
-    def _load_dependency_plugins(self):
-        import importlib.util
-        try:
-            if not hasattr(self, 'dependency_resolvers'):
-                self.dependency_resolvers = {}
-            for plugin_path in self.dependency_plugins:
-                self.logger.info(f"Loading dependency plugin: {plugin_path}")
-                if not os.path.exists(plugin_path):
-                    self.logger.error(f"Dependency plugin file not found: {plugin_path}")
-                    continue
-                try:
-                    spec = importlib.util.spec_from_file_location("plugin", plugin_path)
-                    if not spec or not spec.loader:
-                        self.logger.error(f"Could not load spec for plugin: {plugin_path}")
-                        continue
-                    plugin = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(plugin)
-                    if hasattr(plugin, 'DependencyResolver') and hasattr(plugin.DependencyResolver, '_resolvers'):
-                        self.logger.info(f"Successfully loaded dependency plugin with {len(plugin.DependencyResolver._resolvers)} resolvers")
-                        self.dependency_resolvers.update(plugin.DependencyResolver._resolvers)
-                    else:
-                        self.logger.warning(f"Plugin {plugin_path} does not contain expected DependencyResolver class")
-                except Exception as e:
-                    self.logger.error(f"Error loading dependency plugin {plugin_path}: {e}")
-        except Exception as e:
-            self.logger.error(f"General error in dependency plugin loading: {e}")
 
     def _get_previous_run_status(self, resume_run_id: int) -> Dict[str, str]:
         job_statuses = {}
@@ -621,11 +588,11 @@ class JobExecutioner:
                         self.skip_jobs.add(job_id)
                         self.completed_jobs.add(job_id)
                         self.logger.info(f"Would skip job with status {status}: {job_id}")
-        if self._has_circular_dependencies():
+        if self.dependency_manager.has_circular_dependencies():
             self.logger.error("Circular dependencies detected in job configuration")
             print(f"{Config.COLOR_RED}ERROR: Circular dependencies detected{Config.COLOR_RESET}")
             return 1
-        missing_dependencies = self._check_missing_dependencies()
+        missing_dependencies = self.dependency_manager.check_missing_dependencies()
         if missing_dependencies:
             for job_id, missing_deps in missing_dependencies.items():
                 msg = f"Job '{job_id}' has missing dependencies: {', '.join(missing_deps)}"
@@ -644,7 +611,7 @@ class JobExecutioner:
             print(f"\n{Config.COLOR_CYAN}Application environment variables:{Config.COLOR_RESET}")
             print(f"{Config.COLOR_MAGENTA}{', '.join(app_env_vars)}{Config.COLOR_RESET}")
         print(f"\n{Config.COLOR_CYAN}Job execution order:{Config.COLOR_RESET}")
-        execution_order = self._get_execution_order()
+        execution_order = self.dependency_manager.get_execution_order()
         for i, job_id in enumerate(execution_order):
             job = self.jobs[job_id]
             job_desc = job.get("description", "")
@@ -714,12 +681,12 @@ class JobExecutioner:
                 self.logger.info("Dry run interrupted by user")
                 print("\nDry run interrupted by user")
                 return 0
-        if self._has_circular_dependencies():
+        if self.dependency_manager.has_circular_dependencies():
             self.logger.error("Circular dependencies detected in job configuration")
             self.exit_code = 1
             self._print_abort_summary("FAILED", reason="Circular dependencies detected")
             return self.exit_code
-        missing_dependencies = self._check_missing_dependencies()
+        missing_dependencies = self.dependency_manager.check_missing_dependencies()
         if missing_dependencies:
             for job_id, missing_deps in missing_dependencies.items():
                 self.logger.error(f"Job {job_id} has missing dependencies: {', '.join(missing_deps)}")
@@ -860,42 +827,6 @@ class JobExecutioner:
                 print(f"  - {Config.COLOR_RED}{job_id}{Config.COLOR_RESET}: {', '.join(deps)}")
         print(f"{divider}")
         print("\n")
-
-    def _check_missing_dependencies(self):
-        result = {}
-        for job_id, deps in self.dependencies.items():
-            missing = [dep for dep in deps if dep not in self.jobs]
-            if missing:
-                result[job_id] = missing
-        return result
-
-    def _has_circular_dependencies(self):
-        def dfs(node, visited, recursion_stack, path=None):
-            if path is None:
-                path = []
-            visited.add(node)
-            recursion_stack.add(node)
-            path = path + [node]
-            for neighbor in self.dependencies.get(node, set()):
-                if neighbor not in self.jobs:
-                    self.logger.warning(f"Job '{node}' depends on '{neighbor}' which doesn't exist")
-                    continue
-                if neighbor not in visited:
-                    if dfs(neighbor, visited, recursion_stack, path):
-                        return True
-                elif neighbor in recursion_stack:
-                    cycle_path = path + [neighbor]
-                    self.logger.error(f"Circular dependency detected: {' -> '.join(cycle_path)}")
-                    return True
-            recursion_stack.remove(node)
-            return False
-        visited = set()
-        recursion_stack = set()
-        for job_id in self.jobs:
-            if job_id not in visited:
-                if dfs(job_id, visited, recursion_stack):
-                    return True
-        return False
 
     def _run_sequential(self, max_iter: int) -> int:
         iteration_count = 0
