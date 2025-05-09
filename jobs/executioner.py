@@ -44,6 +44,7 @@ class JobExecutioner:
         
         # Clear any existing handlers (prevents duplication)
         for handler in self.logger.handlers[:]:
+            
             self.logger.removeHandler(handler)
             
         console_handler = logging.StreamHandler(sys.stdout)
