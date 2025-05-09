@@ -28,6 +28,7 @@ from config.loader import Config
 from db.sqlite_backend import db_connection
 from config.validator import validate_config
 from jobs.checks import CHECK_REGISTRY  # Ensure visibility in all contexts
+from jobs.job_runner import JobRunner
 
 class JobExecutioner:
     def __init__(self, config_file: str):
@@ -311,7 +312,6 @@ class JobExecutioner:
         job_description = self.jobs[job_id].get('description', '')
         job_command = self.jobs[job_id]['command']
         job_logger.info(f"Executing job - {job_id}: {job_command}")
-        self.logger.info(f"Starting job '{job_id}'{': ' + job_description if job_description else ''}")
         self.job_log_paths[job_id] = job_log_path  # Store the job log path
         return job_logger, job_file_handler, job_log_path
 
@@ -428,6 +428,20 @@ class JobExecutioner:
                     return False, reason
                 return True, reason
         return True, ""
+
+    def _validate_timeout(self, timeout, logger=None):
+        if timeout is not None:
+            try:
+                timeout = int(timeout)
+                if timeout <= 0:
+                    if logger:
+                        logger.warning(f"Invalid timeout value: {timeout}. Using default of 600 seconds.")
+                    timeout = 600
+            except (ValueError, TypeError):
+                if logger:
+                    logger.warning(f"Non-numeric timeout value: {timeout}. Using default of 600 seconds.")
+                timeout = 600
+        return timeout
 
     def _run_subprocess_command(self, command: str, job_id: str, job_logger: logging.Logger, timeout: int) -> bool:
         process = None
@@ -648,733 +662,22 @@ class JobExecutioner:
 
     def _execute_job(self, job_id: str) -> bool:
         job = self.jobs[job_id]
-        command = job["command"]
-        timeout = job.get("timeout", Config.DEFAULT_TIMEOUT)
-        if self.dry_run:
-            job_logger = None
-            job_file_handler = None
-        else:
-            job_logger, job_file_handler, _ = self._setup_job_logger(job_id)
-            job_logger.info(f"Starting Job: {job_id}")
-            job_logger.info(f"Command: {command}")
-        # --- Pre-checks integration ---
-        pre_checks = job.get("pre_checks", [])
-        if not self.dry_run and pre_checks:
-            job_logger.info(f"Running pre-checks for job {job_id}: {pre_checks}")
-            if not self._run_checks(pre_checks, job_logger, phase="pre", job_id=job_id):
-                job_logger.error(f"Pre-checks failed for job {job_id}. Skipping job execution.")
-                self._update_job_status(job_id, "PRECHECK_FAILED")
-                if job_file_handler:
-                    job_logger.removeHandler(job_file_handler)
-                    job_file_handler.close()
-                return False
-        # --- End pre-checks ---
-        max_retries = job.get("max_retries", self.config.get("default_max_retries", 0))
-        retry_delay = job.get("retry_delay", self.config.get("default_retry_delay", 30))
-        retry_backoff = job.get("retry_backoff", self.config.get("default_retry_backoff", 1.5))
-        retry_on_status = job.get("retry_on_status", ["ERROR", "FAILED", "TIMEOUT"])
-        max_retry_time = job.get("max_retry_time", self.config.get("default_max_retry_time", 1800))
-        jitter = job.get("retry_jitter", self.config.get("default_retry_jitter", 0.1))
-        retry_on_exit_codes = job.get("retry_on_exit_codes", self.config.get("default_retry_on_exit_codes", [1]))
-        current_retry = 0
-        retry_history = []
-        try:
-            with db_connection() as conn:
-                cursor = conn.cursor()
-                try:
-                    cursor.execute(
-                        "SELECT retry_count, retry_history FROM job_history WHERE run_id = ? AND id = ?", 
-                        (self.run_id, job_id)
-                    )
-                    row = cursor.fetchone()
-                    if row:
-                        current_retry = row[0] or 0
-                        if row[1]:
-                            try:
-                                retry_history = json.loads(row[1])
-                            except (json.JSONDecodeError, TypeError):
-                                retry_history = []
-                except sqlite3.OperationalError as e:
-                    if "no such column" in str(e):
-                        self.logger.warning(f"Database schema missing column: {e}")
-                    else:
-                        raise
-        except (sqlite3.Error, Exception) as e:
-            if job_logger:
-                job_logger.warning(f"Could not retrieve retry information: {e}")
-            else:
-                self.logger.warning(f"Could not retrieve retry information for job {job_id}: {e}")
-            pass
-        if self.dry_run:
-            print(f"[DRY RUN] Would execute job: {job_id} - Command: {command[:60]}{'...' if len(command) > 60 else ''}")
-            retry_info = f" (with {max_retries} retries)" if max_retries > 0 else ""
-            self.logger.info(f"[DRY RUN] Would execute job: {job_id}{retry_info}")
-            return True
-        if max_retries > 0:
-            job_logger.info(f"Retry configuration: max_retries={max_retries}, delay={retry_delay}s, backoff={retry_backoff}")
-        last_error = None
-        attempt = 1
-        try:
-            if not command.strip():
-                job_logger.info(f"Job {job_id}: SUCCESS (empty command)")
-                self._update_job_status(job_id, "SUCCESS")
-                return True
-            timeout = self._validate_timeout(timeout, job_logger)
-            start_time = time.time()
-            total_retry_time = 0
-            if not retry_history:
-                retry_history = []
-            while True:
-                if total_retry_time > max_retry_time and attempt > 1:
-                    job_logger.warning(f"Exceeded maximum retry time ({max_retry_time}s). Aborting after {attempt-1} retries.")
-                    self.logger.warning(f"Job {job_id} exceeded maximum retry time. Giving up after {attempt-1} retries.")
-                    if not self.dry_run:
-                        self._update_retry_history(job_id, retry_history, current_retry, 
-                                                 "ABANDONED", f"Exceeded max retry time of {max_retry_time}s")
-                    return False
-                if attempt > 1:
-                    retry_msg = f"Retry attempt {attempt}/{max_retries+1} for job {job_id}"
-                    job_logger.info(f"{retry_msg} (after {current_delay}s delay)")
-                    self.logger.info(retry_msg)
-                    print(f"{Config.COLOR_CYAN}{retry_msg}{Config.COLOR_RESET}")
-                if jitter > 0 and attempt > 1:
-                    jitter_seconds = random.uniform(-jitter, jitter) * current_delay
-                    actual_delay = max(0.1, current_delay + jitter_seconds)
-                    if abs(jitter_seconds) > 0.1:
-                        job_logger.debug(f"Added {jitter_seconds:.2f}s jitter to retry delay")
-                attempt_start = time.time()
-                attempt_info = {
-                    "attempt": attempt,
-                    "timestamp": datetime.datetime.now().isoformat(),
-                    "start_time": attempt_start
-                }
-                exit_code = None
-                try:
-                    success = self._run_subprocess_command(command, job_id, job_logger, timeout)
-                    duration = round(time.time() - attempt_start, 2)
-                    job_logger.info(f"Job attempt {attempt} duration: {duration} seconds")
-                    try:
-                        exit_code = self._get_last_exit_code(job_id)
-                    except:
-                        pass
-                except Exception as e:
-                    success = False
-                    job_logger.error(f"Exception during job execution: {e}")
-                attempt_info.update({
-                    "duration": duration,
-                    "success": success,
-                    "exit_code": exit_code
-                })
-                retry_history.append(attempt_info)
-                if not self.dry_run:
-                    try:
-                        with db_connection() as conn:
-                            retry_history_json = json.dumps(retry_history)
-                            cursor = conn.cursor()
-                            cursor.execute(
-                                """
-                                UPDATE job_history 
-                                SET duration_seconds = ?, retry_count = ?, retry_history = ?, 
-                                    last_exit_code = ? 
-                                WHERE run_id = ? AND id = ?
-                                """,
-                                (duration, current_retry, retry_history_json, exit_code, self.run_id, job_id)
-                            )
-                            conn.commit()
-                    except sqlite3.Error as e:
-                        job_logger.warning(f"Failed to update job metrics: {e}")
-                if success:
-                    if attempt > 1:
-                        job_logger.info(f"Job {job_id} succeeded after {attempt} attempts")
-                        self.logger.info(f"Job {job_id} succeeded after {attempt} attempts")
-                    # --- Post-checks integration ---
-                    post_checks = job.get("post_checks", [])
-                    if post_checks:
-                        job_logger.info(f"Running post-checks for job {job_id}: {post_checks}")
-                        if not self._run_checks(post_checks, job_logger, phase="post", job_id=job_id):
-                            job_logger.error(f"Post-checks failed for job {job_id}. Marking job as failed.")
-                            self._update_job_status(job_id, "POSTCHECK_FAILED")
-                            return False
-                    # --- End post-checks ---
-                    return True
-                should_retry = False
-                retry_reason = None
-                last_status = "FAILED"
-                if current_retry < max_retries:
-                    should_retry = True
-                    retry_reason = f"Job failed and current_retry ({current_retry}) < max_retries ({max_retries})"
-                if last_status in retry_on_status:
-                    should_retry = True
-                    retry_reason = f"Status '{last_status}' is in retry_on_status list"
-                if exit_code is not None and exit_code in retry_on_exit_codes:
-                    should_retry = True
-                    retry_reason = f"Exit code {exit_code} is in retry_on_exit_codes list"
-                current_retry += 1
-                if current_retry > max_retries:
-                    job_logger.warning(f"Job {job_id} failed after {attempt} attempts. No more retries (max: {max_retries}).")
-                    self.logger.warning(f"Job {job_id} failed after {attempt} attempts. No more retries.")
-                    if not self.dry_run:
-                        self._update_retry_history(job_id, retry_history, current_retry, 
-                                                 "FAILED", f"Reached max retry count ({max_retries})")
-                    return False
-                if not should_retry:
-                    job_logger.info(f"Not retrying job: {retry_reason or f'Status {last_status} not in retry conditions'}")
-                    if not self.dry_run:
-                        try:
-                            with db_connection() as conn:
-                                cursor = conn.cursor()
-                                cursor.execute(
-                                    "UPDATE job_history SET status = ? WHERE run_id = ? AND id = ?",
-                                    ("FAILED", self.run_id, job_id)
-                                )
-                                conn.commit()
-                        except sqlite3.Error as e:
-                            job_logger.warning(f"Failed to update job status: {e}")
-                    return False
-                base_delay = retry_delay * (retry_backoff ** (current_retry - 1))
-                if jitter > 0:
-                    jitter_factor = 1.0 + random.uniform(-jitter, jitter)
-                    current_delay = max(0.1, base_delay * jitter_factor)
-                else:
-                    current_delay = base_delay
-                job_logger.info(f"Will retry job {job_id} in {current_delay:.1f} seconds (attempt {attempt+1}/{max_retries+1})")
-                if not self.dry_run:
-                    self._update_retry_history(job_id, retry_history, current_retry, 
-                                             "RETRYING", retry_reason)
-                time.sleep(current_delay)
-                attempt += 1
-                total_retry_time = time.time() - start_time
-        except Exception as e:
-            job_logger.exception(f"Job {job_id}: ERROR - {e}")
-            print(f"{Config.COLOR_RED}Job {job_id}: ERROR - {e}{Config.COLOR_RESET}")
-            self._update_job_status(job_id, "ERROR")
-            if not self.dry_run:
-                try:
-                    with db_connection() as conn:
-                        cursor = conn.cursor()
-                        cursor.execute(
-                            "UPDATE job_history SET last_error = ? WHERE run_id = ? AND id = ?",
-                            (str(e), self.run_id, job_id)
-                        )
-                        conn.commit()
-                except sqlite3.Error as db_err:
-                    job_logger.warning(f"Failed to store error details: {db_err}")
-            return False
-        finally:
-            job_logger.removeHandler(job_file_handler)
-            job_file_handler.close()
-
-    def _get_job_status(self, job_id: str) -> str:
-        if self.dry_run:
-            return "UNKNOWN"
-        try:
-            with db_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "SELECT status FROM job_history WHERE run_id = ? AND id = ?",
-                    (self.run_id, job_id)
-                )
-                row = cursor.fetchone()
-                if row:
-                    return row[0]
-                return "UNKNOWN"
-        except sqlite3.Error as e:
-            self.logger.warning(f"Error retrieving job status: {e}")
-            return "UNKNOWN"
-
-    def _validate_timeout(self, timeout: Any, logger: logging.Logger) -> int:
-        if timeout is not None:
-            try:
-                timeout = int(timeout)
-                if timeout <= 0:
-                    logger.warning(f"Invalid timeout value: {timeout}. Using default of {Config.DEFAULT_TIMEOUT} seconds.")
-                    timeout = Config.DEFAULT_TIMEOUT
-            except (ValueError, TypeError):
-                logger.warning(f"Non-numeric timeout value: {timeout}. Using default of {Config.DEFAULT_TIMEOUT} seconds.")
-                timeout = Config.DEFAULT_TIMEOUT
-        return timeout
-
-    def _update_retry_history(self, job_id: str, retry_history: list, retry_count: int, status: str, reason: str = None) -> None:
-        try:
-            with db_connection() as conn:
-                retry_history_json = json.dumps(retry_history)
-                cursor = conn.cursor()
-                cursor.execute("PRAGMA table_info(job_history)")
-                columns = [col[1] for col in cursor.fetchall()]
-                columns_to_add = []
-                if 'retry_history' not in columns:
-                    columns_to_add.append(("retry_history", "TEXT"))
-                if 'last_exit_code' not in columns:
-                    columns_to_add.append(("last_exit_code", "INTEGER"))
-                if 'retry_count' not in columns:
-                    columns_to_add.append(("retry_count", "INTEGER", "DEFAULT 0"))
-                if 'last_error' not in columns:
-                    columns_to_add.append(("last_error", "TEXT"))
-                if columns_to_add:
-                    for col_info in columns_to_add:
-                        col_name = col_info[0]
-                        col_type = col_info[1]
-                        col_constraint = col_info[2] if len(col_info) > 2 else ""
-                        alter_sql = f"ALTER TABLE job_history ADD COLUMN {col_name} {col_type} {col_constraint}".strip()
-                        try:
-                            cursor.execute(alter_sql)
-                            self.logger.info(f"Added missing column to job_history: {col_name} {col_type}")
-                        except sqlite3.OperationalError as e:
-                            if "duplicate column name" not in str(e):
-                                raise
-                    conn.commit()
-                cursor.execute(
-                    "SELECT 1 FROM job_history WHERE run_id = ? AND id = ?",
-                    (self.run_id, job_id)
-                )
-                if not cursor.fetchone():
-                    job = self.jobs[job_id]
-                    cursor.execute(
-                        """
-                        INSERT INTO job_history
-                        (run_id, id, description, command, status, application_name)
-                        VALUES (?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            self.run_id,
-                            job_id,
-                            job.get("description", ""),
-                            job["command"],
-                            status,
-                            self.application_name
-                        )
-                    )
-                    conn.commit()
-                try:
-                    if reason:
-                        cursor.execute(
-                            """
-                            UPDATE job_history 
-                            SET retry_count = ?, retry_history = ?, last_error = ?
-                            WHERE run_id = ? AND id = ?
-                            """,
-                            (retry_count, retry_history_json, reason, self.run_id, job_id)
-                        )
-                    else:
-                        cursor.execute(
-                            """
-                            UPDATE job_history 
-                            SET retry_count = ?, retry_history = ?
-                            WHERE run_id = ? AND id = ?
-                            """,
-                            (retry_count, retry_history_json, self.run_id, job_id)
-                        )
-                    conn.commit()
-                except sqlite3.OperationalError as e:
-                    self.logger.warning(f"Could not update retry history, possible schema issue: {e}")
-                self.logger.debug(f"Updated retry history for job {job_id}: status={status}, retry_count={retry_count}")
-        except sqlite3.Error as e:
-            self.logger.warning(f"Failed to update retry history for job {job_id}: {e}")
-
-    def _get_last_exit_code(self, job_id: str) -> int:
-        try:
-            with db_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("PRAGMA table_info(job_history)")
-                columns = [col[1] for col in cursor.fetchall()]
-                if 'last_exit_code' not in columns:
-                    try:
-                        cursor.execute("ALTER TABLE job_history ADD COLUMN last_exit_code INTEGER")
-                        conn.commit()
-                        self.logger.info("Added missing column to job_history: last_exit_code INTEGER")
-                    except sqlite3.OperationalError as e:
-                        if "duplicate column name" not in str(e):
-                            self.logger.warning(f"Could not add last_exit_code column: {e}")
-                    return None
-                try:
-                    cursor.execute(
-                        "SELECT last_exit_code FROM job_history WHERE run_id = ? AND id = ?",
-                        (self.run_id, job_id)
-                    )
-                    row = cursor.fetchone()
-                    if row and row[0] is not None:
-                        return int(row[0])
-                except sqlite3.OperationalError as e:
-                    self.logger.debug(f"Error selecting last_exit_code: {e}")
-                return None
-        except (sqlite3.Error, ValueError) as e:
-            self.logger.debug(f"Could not retrieve exit code for job {job_id}: {e}")
-            return None
-
-    @classmethod
-    def generate_test_coverage_report(cls, output_file: str = None, fail_under: float = 70.0, include_branches: bool = True, ci_mode: bool = False):
-
-        """
-        Generate a comprehensive test coverage report with detailed metrics per module and function.
-        
-        This enhanced method provides much more detailed coverage information, including:
-        - Line coverage
-        - Branch coverage (conditional statements)
-        - Function coverage
-        - Missing lines and branches
-        - Gaps in coverage highlighted
-        - Integration with CI systems
-        
-        Args:
-            output_file: Optional path to save the coverage report.
-                         If None, prints to stdout.
-            fail_under: Coverage percentage below which the process will exit with a non-zero code.
-            include_branches: Whether to include branch coverage in the report.
-            ci_mode: Whether to generate CI-friendly output (JUnit XML, etc.)
-        
-        Returns:
-            dict: Coverage data containing detailed metrics
-            
-        Note:
-            Requires the `coverage` and `pytest` packages to be installed.
-            Install with: pip install coverage pytest pytest-cov
-        """
-        try:
-            import coverage
-            import importlib
-            import os
-            import sys
-            import json
-            from pathlib import Path
-            
-            # Get the module path
-            module_path = os.path.abspath(__file__)
-            module_dir = os.path.dirname(module_path)
-            module_name = os.path.basename(module_path).replace(".py", "")
-            
-            # Find or create a test directory
-            test_dir = os.path.join(module_dir, "tests")
-            if not os.path.exists(test_dir):
-                print(f"No test directory found at {test_dir}. Creating it now.")
-                os.makedirs(test_dir)
-            
-            # Check for test files and recommend test structure if missing
-            test_files = [f for f in os.listdir(test_dir) if f.startswith("test_") and f.endswith(".py")]
-            if not test_files:
-                print(f"No test files found in {test_dir}. You may want to create some.")
-                # Create a test template file to help users get started
-                template_path = os.path.join(test_dir, f"test_{module_name}.py")
-                if not os.path.exists(template_path):
-                    with open(template_path, 'w') as f:
-                        f.write(f'''import pytest
-import os
-import sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from {module_name} import JobExecutioner, Config
-
-# Basic tests to get started
-def test_config_initialization():
-    """Test that Config initializes with expected default values."""
-    assert Config.DEFAULT_TIMEOUT == 600
-    assert hasattr(Config, 'LOG_DIR')
-
-def test_job_executioner_initialization():
-    """Test basic JobExecutioner initialization with a minimal config."""
-    config_json = {{
-        "jobs": [
-            {{
-                "id": "test1",
-                "command": "echo 'test'"
-            }}
-        ]
-    }}
-    import tempfile
-    import json
-    with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
-        json.dump(config_json, f)
-        config_path = f.name
-        
-    try:
-        # This should not raise an exception
-        executioner = JobExecutioner(config_path)
-        assert isinstance(executioner, JobExecutioner)
-        assert "test1" in executioner.jobs
-    finally:
-        os.unlink(config_path)
-''')
-                    print(f"Created test template at {template_path}")
-            
-            # Create .coveragerc configuration file if it doesn't exist
-            coverage_config = os.path.join(module_dir, ".coveragerc")
-            if not os.path.exists(coverage_config):
-                with open(coverage_config, 'w') as f:
-                    f.write('''[run]
-source = .
-omit = 
-    */tests/*
-    */__pycache__/*
-    */site-packages/*
-
-[report]
-exclude_lines =
-    pragma: no cover
-    def __repr__
-    raise NotImplementedError
-    if __name__ == .__main__.:
-    pass
-    raise ImportError
-    except ImportError
-
-[html]
-directory = coverage_html_report
-''')
-                print(f"Created coverage configuration at {coverage_config}")
-            
-            # Determine output paths
-            if output_file:
-                html_dir = os.path.join(output_file, 'html')
-                xml_path = os.path.join(output_file, 'coverage.xml')
-                json_path = os.path.join(output_file, 'coverage.json')
-            else:
-                html_dir = os.path.join(module_dir, 'coverage_html_report')
-                xml_path = os.path.join(module_dir, 'coverage.xml')
-                json_path = os.path.join(module_dir, 'coverage.json')
-            
-            # Initialize coverage with branch coverage
-            cov = coverage.Coverage(
-                source=[module_dir],
-                omit=["*/tests/*", "*/__pycache__/*", "*/site-packages/*"],
-                config_file=coverage_config,
-                branch=include_branches,
-            )
-            
-            try:
-                # Start coverage tracking
-                cov.start()
-                
-                # Import test modules and run tests with pytest
-                # Use pytest-cov for more detailed coverage
-                import pytest
-                pytest_args = ["-v", test_dir]
-                
-                if ci_mode:
-                    # Add JUnit XML output for CI systems
-                    junit_path = os.path.join(module_dir, 'junit.xml')
-                    pytest_args.extend(['--junitxml', junit_path])
-                
-                result = pytest.main(pytest_args)
-                
-                # Stop coverage tracking
-                cov.stop()
-                cov.save()
-                
-                # Create detailed coverage data
-                detailed_coverage = {}
-                
-                # Get coverage data by module and file
-                for module_file in cov.get_data().measured_files():
-                    module_cov = {}
-                    relative_path = os.path.relpath(module_file, module_dir)
-                    analysis = cov.analysis2(module_file)
-                    
-                    module_cov['lines_total'] = len(analysis[1]) + len(analysis[2])
-                    module_cov['lines_covered'] = len(analysis[1])
-                    module_cov['lines_missed'] = len(analysis[2])
-                    module_cov['branches_total'] = len(analysis[3]) + len(analysis[4]) if include_branches else 0
-                    module_cov['branches_covered'] = len(analysis[3]) if include_branches else 0
-                    module_cov['branches_missed'] = len(analysis[4]) if include_branches else 0
-                    
-                    if module_cov['lines_total'] > 0:
-                        module_cov['line_rate'] = module_cov['lines_covered'] / module_cov['lines_total']
-                    else:
-                        module_cov['line_rate'] = 0
-                        
-                    if include_branches and module_cov['branches_total'] > 0:
-                        module_cov['branch_rate'] = module_cov['branches_covered'] / module_cov['branches_total']
-                    else:
-                        module_cov['branch_rate'] = 0
-                    
-                    module_cov['missing_lines'] = sorted(analysis[2])
-                    module_cov['missing_branches'] = sorted(br[0] for br in analysis[4]) if include_branches else []
-                    
-                    detailed_coverage[relative_path] = module_cov
-                
-                # Generate reports
-                total_cov = cov.report(file=sys.stdout if not output_file else None)
-                
-                # Generate HTML report with annotated source code
-                cov.html_report(directory=html_dir)
-                
-                # Generate machine-readable reports for CI systems
-                cov.xml_report(outfile=xml_path)
-                cov.json_report(outfile=json_path)
-                
-                if output_file:
-                    print(f"HTML coverage report saved to: {html_dir}")
-                    print(f"XML coverage report saved to: {xml_path}")
-                    print(f"JSON coverage report saved to: {json_path}")
-                else:
-                    print("\nCoverage Report:")
-                    print("===============")
-                    print(f"Overall coverage: {total_cov:.2f}%")
-                
-                # Identify coverage gaps and high-risk areas
-                high_risk_modules = []
-                for module, data in detailed_coverage.items():
-                    line_rate = data['line_rate'] * 100
-                    if line_rate < fail_under:
-                        high_risk_modules.append({
-                            'module': module, 
-                            'coverage': line_rate,
-                            'missing_lines': data['missing_lines'][:10]  # First 10 missing lines
-                        })
-                
-                if high_risk_modules:
-                    print("\nHigh Risk Areas (below target coverage):")
-                    print("=========================================")
-                    for module in sorted(high_risk_modules, key=lambda x: x['coverage']):
-                        print(f"{module['module']}: {module['coverage']:.2f}% - Missing lines: {module['missing_lines']}")
-                
-                # Log coverage statistics for tracking over time
-                coverage_data = {
-                    "timestamp": datetime.datetime.now().isoformat(),
-                    "overall_coverage": total_cov,
-                    "modules": detailed_coverage,
-                    "high_risk_modules": [m['module'] for m in high_risk_modules],
-                    "test_result": "PASS" if result == 0 else "FAIL"
-                }
-                
-                # Update coverage history
-                coverage_log = os.path.join(module_dir, "coverage_history.json")
-                history = []
-                if os.path.exists(coverage_log):
-                    try:
-                        with open(coverage_log, 'r') as f:
-                            history = json.load(f)
-                    except json.JSONDecodeError:
-                        pass  # Start with empty history if file is corrupt
-                
-                history.append(coverage_data)
-                with open(coverage_log, 'w') as f:
-                    json.dump(history, f, indent=2)
-                
-                print(f"Coverage history updated in {coverage_log}")
-                print(f"Current coverage: {total_cov:.2f}%")
-                
-                # Create trend analysis
-                if len(history) > 1:
-                    prev_coverage = history[-2]["overall_coverage"]
-                    coverage_change = total_cov - prev_coverage
-                    trend = "↑" if coverage_change > 0 else "↓" if coverage_change < 0 else "="
-                    print(f"Coverage trend: {trend} {abs(coverage_change):.2f}% from previous run")
-                
-                # Generate badge file for README
-                badge_path = os.path.join(module_dir, "coverage-badge.svg")
-                badge_color = "brightgreen" if total_cov >= 90 else "green" if total_cov >= 80 else "yellowgreen" if total_cov >= 70 else "yellow" if total_cov >= 60 else "orange" if total_cov >= 50 else "red"
-                
-                badge_content = f"""<svg xmlns="http://www.w3.org/2000/svg" width="106" height="20">
-<linearGradient id="a" x2="0" y2="100%">
-    <stop offset="0" stop-color="#bbb" stop-opacity=".1"/>
-    <stop offset="1" stop-opacity=".1"/>
-</linearGradient>
-<rect rx="3" width="106" height="20" fill="#555"/>
-<rect rx="3" x="60" width="46" height="20" fill="#{badge_color}"/>
-<path fill="#{badge_color}" d="M60 0h4v20h-4z"/>
-<rect rx="3" width="106" height="20" fill="url(#a)"/>
-<g fill="#fff" text-anchor="middle" font-family="DejaVu Sans,Verdana,Geneva,sans-serif" font-size="11">
-    <text x="30" y="15" fill="#010101" fill-opacity=".3">coverage</text>
-    <text x="30" y="14">coverage</text>
-    <text x="82" y="15" fill="#010101" fill-opacity=".3">{total_cov:.0f}%</text>
-    <text x="82" y="14">{total_cov:.0f}%</text>
-</g>
-</svg>"""
-                
-                with open(badge_path, 'w') as f:
-                    f.write(badge_content)
-                
-                print(f"Coverage badge created at {badge_path}")
-                print(f"Add this to your README.md: ![Coverage](./coverage-badge.svg)")
-                
-                # Exit with error if coverage is below threshold for CI
-                if ci_mode and total_cov < fail_under:
-                    print(f"Coverage {total_cov:.2f}% is below minimum required {fail_under:.2f}%")
-                    return coverage_data, 1  # Return exit code for caller
-                
-                return coverage_data, 0
-                
-            finally:
-                if not output_file:  # Only erase if we're not saving to file
-                    cov.erase()  # Clean up
-                
-        except ImportError as e:
-            print(f"Error: Missing required packages - {e}")
-            print("Please install with: pip install coverage pytest pytest-cov")
-            return None, 1
-        except Exception as e:
-            print(f"Error generating coverage report: {e}")
-            return None, 1
-
-        pass
-
-    def _send_notification(self, success: bool):
-        """Send email notification with retry and TLS support."""
-        try:
-            hostname = socket.gethostname()
-            status = "SUCCESS" if success else "FAILURE"
-            subject = f"[{status}] Executioner Job {self.application_name} (Run #{self.run_id})"
-            msg = MIMEMultipart()
-            msg['From'] = f"Executioner <noreply@{hostname}>"
-            msg['To'] = self.email_address
-            msg['Subject'] = subject
-
-            duration = None
-            if self.start_time and self.end_time:
-                duration = self.end_time - self.start_time
-
-            body = f"""
-Job Execution Report
-===================
-
-Application: {self.application_name}
-Run ID: {self.run_id}
-Status: {status}
-Host: {hostname}
-Start Time: {self.start_time}
-End Time: {self.end_time}
-Duration: {duration}
-
-Completed Jobs: {len(self.completed_jobs)}
-Failed Jobs: {len(self.failed_jobs)}
-Skipped Jobs: {len(self.skip_jobs)}
-
-"""
-            if self.failed_jobs:
-                body += "\nFailed Jobs:\n------------\n"
-                for job_id in self.failed_jobs:
-                    body += f"- {job_id}: {self.jobs[job_id]['description']}\n"
-
-            not_completed = set(self.jobs.keys()) - self.completed_jobs - self.skip_jobs
-            if not_completed:
-                body += "\nNot Completed Jobs:\n-----------------\n"
-                for job_id in not_completed:
-                    body += f"- {job_id}: {self.jobs[job_id]['description']}\n"
-
-            msg.attach(MIMEText(body, 'plain'))
-
-            # Send email with retries
-            context = ssl.create_default_context()
-            for attempt in range(3):
-                try:
-                    with smtplib.SMTP(self.smtp_server, self.smtp_port, timeout=5) as server:
-                        server.starttls(context=context)
-                        if self.smtp_user and self.smtp_password:
-                            server.login(self.smtp_user, self.smtp_password)
-                        server.send_message(msg)
-                    self.logger.info(f"Sent {status} notification email to {self.email_address}")
-                    break
-                except (smtplib.SMTPException, ConnectionRefusedError, TimeoutError) as e:
-                    self.logger.error(f"Email attempt {attempt+1} failed: {e}")
-                    if attempt < 2:
-                        time.sleep(2 ** attempt)
-                    else:
-                        self.logger.info(f"Email that would have been sent:")
-                        self.logger.info(f"To: {self.email_address}")
-                        self.logger.info(f"Subject: {subject}")
-                        self.logger.info(f"Body: {body}")
-
-        except Exception as e:
-            self.logger.error(f"Failed to prepare notification email: {e}")
-
+        runner = JobRunner(
+            job_id=job_id,
+            job_config=job,
+            global_env=self.app_env_variables,
+            main_logger=self.logger,
+            config=self.config,
+            run_id=self.run_id,
+            app_name=self.application_name,
+            db_connection=db_connection,
+            validate_timeout=self._validate_timeout,
+            update_job_status=self._update_job_status,
+            update_retry_history=self._update_retry_history,
+            get_last_exit_code=self._get_last_exit_code,
+            setup_job_logger=self._setup_job_logger
+        )
+        return runner.run(dry_run=self.dry_run)
 
     def _run_dry(self, resume_run_id=None, resume_failed_only=False):
         self.logger.info(f"Starting dry run - printing execution plan")
@@ -1595,9 +898,14 @@ Skipped Jobs: {len(self.skip_jobs)}
         print(f"{Config.COLOR_CYAN}Jobs Failed:{Config.COLOR_RESET} {Config.COLOR_RED if len(self.failed_jobs) > 0 else ''}{len(self.failed_jobs)}{Config.COLOR_RESET}")
         print(f"{Config.COLOR_CYAN}Jobs Skipped:{Config.COLOR_RESET} {Config.COLOR_YELLOW if len(self.skip_jobs) > 0 else ''}{len(self.skip_jobs)}{Config.COLOR_RESET}")
         if self.failed_jobs:
-            print(f"\n{Config.COLOR_CYAN}Failed Jobs:{Config.COLOR_RESET}")
+            print(f"\n{Config.COLOR_CYAN}Failed Jobs (see job log paths below):{Config.COLOR_RESET}")
             for job_id in self.failed_jobs:
-                print(f"  - {Config.COLOR_RED}{job_id}{Config.COLOR_RESET}: {self.jobs[job_id].get('description', '')}")
+                job_log_path = self.job_log_paths.get(job_id, None)
+                desc = self.jobs[job_id].get('description', '')
+                if job_log_path:
+                    print(f"  - {Config.COLOR_RED}{job_id}{Config.COLOR_RESET}: {desc}\n      Log: {job_log_path}")
+                else:
+                    print(f"  - {Config.COLOR_RED}{job_id}{Config.COLOR_RESET}: {desc}")
         print(f"{divider}")
         print("\n")
         return self.exit_code
@@ -1672,9 +980,6 @@ Skipped Jobs: {len(self.skip_jobs)}
                     self.failed_jobs.add(job_id)
                     self._mark_dependent_jobs_failed(job_id)
                     if not self.continue_on_error:
-                        job_log_path = self.job_log_paths.get(job_id, None)
-                        extra = f" See log {job_log_path}" if job_log_path else ""
-                        self.logger.error(f"Job {job_id} failed. Stopping execution.{extra}")
                         self.exit_code = 1
                         break
                     self.logger.warning(f"Job {job_id} failed but continuing.")
@@ -1708,9 +1013,6 @@ Skipped Jobs: {len(self.skip_jobs)}
                                 self.failed_jobs.add(job_id)
                                 self._mark_dependent_jobs_failed(job_id)
                                 if not self.continue_on_error:
-                                    job_log_path = self.job_log_paths.get(job_id, None)
-                                    extra = f" See log {job_log_path}" if job_log_path else ""
-                                    self.logger.error(f"Job {job_id} failed. Stopping.{extra}")
                                     self.exit_code = 1
                                     self.interrupted = True
                                 else:
@@ -1908,5 +1210,130 @@ Skipped Jobs: {len(self.skip_jobs)}
                 job_logger.error(f"Error running {phase}-check {name}: {e}")
                 return False
         return True
+
+    def _get_job_status(self, job_id: str) -> str:
+        if self.dry_run:
+            return "UNKNOWN"
+        try:
+            with db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT status FROM job_history WHERE run_id = ? AND id = ?",
+                    (self.run_id, job_id)
+                )
+                row = cursor.fetchone()
+                if row:
+                    return row[0]
+                return "UNKNOWN"
+        except sqlite3.Error as e:
+            self.logger.warning(f"Error retrieving job status: {e}")
+            return "UNKNOWN"
+
+    def _update_retry_history(self, job_id: str, retry_history: list, retry_count: int, status: str, reason: str = None) -> None:
+        try:
+            with db_connection() as conn:
+                retry_history_json = json.dumps(retry_history)
+                cursor = conn.cursor()
+                cursor.execute("PRAGMA table_info(job_history)")
+                columns = [col[1] for col in cursor.fetchall()]
+                columns_to_add = []
+                if 'retry_history' not in columns:
+                    columns_to_add.append(("retry_history", "TEXT"))
+                if 'last_exit_code' not in columns:
+                    columns_to_add.append(("last_exit_code", "INTEGER"))
+                if 'retry_count' not in columns:
+                    columns_to_add.append(("retry_count", "INTEGER", "DEFAULT 0"))
+                if 'last_error' not in columns:
+                    columns_to_add.append(("last_error", "TEXT"))
+                if columns_to_add:
+                    for col_info in columns_to_add:
+                        col_name = col_info[0]
+                        col_type = col_info[1]
+                        col_constraint = col_info[2] if len(col_info) > 2 else ""
+                        alter_sql = f"ALTER TABLE job_history ADD COLUMN {col_name} {col_type} {col_constraint}".strip()
+                        try:
+                            cursor.execute(alter_sql)
+                            self.logger.info(f"Added missing column to job_history: {col_name} {col_type}")
+                        except sqlite3.OperationalError as e:
+                            if "duplicate column name" not in str(e):
+                                raise
+                    conn.commit()
+                cursor.execute(
+                    "SELECT 1 FROM job_history WHERE run_id = ? AND id = ?",
+                    (self.run_id, job_id)
+                )
+                if not cursor.fetchone():
+                    job = self.jobs[job_id]
+                    cursor.execute(
+                        """
+                        INSERT INTO job_history
+                        (run_id, id, description, command, status, application_name)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            self.run_id,
+                            job_id,
+                            job.get("description", ""),
+                            job["command"],
+                            status,
+                            self.application_name
+                        )
+                    )
+                    conn.commit()
+                try:
+                    if reason:
+                        cursor.execute(
+                            """
+                            UPDATE job_history 
+                            SET retry_count = ?, retry_history = ?, last_error = ?
+                            WHERE run_id = ? AND id = ?
+                            """,
+                            (retry_count, retry_history_json, reason, self.run_id, job_id)
+                        )
+                    else:
+                        cursor.execute(
+                            """
+                            UPDATE job_history 
+                            SET retry_count = ?, retry_history = ?
+                            WHERE run_id = ? AND id = ?
+                            """,
+                            (retry_count, retry_history_json, self.run_id, job_id)
+                        )
+                    conn.commit()
+                except sqlite3.OperationalError as e:
+                    self.logger.warning(f"Could not update retry history, possible schema issue: {e}")
+                self.logger.debug(f"Updated retry history for job {job_id}: status={status}, retry_count={retry_count}")
+        except sqlite3.Error as e:
+            self.logger.warning(f"Failed to update retry history for job {job_id}: {e}")
+
+    def _get_last_exit_code(self, job_id: str) -> int:
+        try:
+            with db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("PRAGMA table_info(job_history)")
+                columns = [col[1] for col in cursor.fetchall()]
+                if 'last_exit_code' not in columns:
+                    try:
+                        cursor.execute("ALTER TABLE job_history ADD COLUMN last_exit_code INTEGER")
+                        conn.commit()
+                        self.logger.info("Added missing column to job_history: last_exit_code INTEGER")
+                    except sqlite3.OperationalError as e:
+                        if "duplicate column name" not in str(e):
+                            self.logger.warning(f"Could not add last_exit_code column: {e}")
+                    return None
+                try:
+                    cursor.execute(
+                        "SELECT last_exit_code FROM job_history WHERE run_id = ? AND id = ?",
+                        (self.run_id, job_id)
+                    )
+                    row = cursor.fetchone()
+                    if row and row[0] is not None:
+                        return int(row[0])
+                except sqlite3.OperationalError as e:
+                    self.logger.debug(f"Error selecting last_exit_code: {e}")
+                return None
+        except (sqlite3.Error, ValueError) as e:
+            self.logger.debug(f"Could not retrieve exit code for job {job_id}: {e}")
+            return None
 
 # ... existing code ... 

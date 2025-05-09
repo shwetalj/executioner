@@ -11,7 +11,7 @@
         {
             "id": "job_a",
             "description": "Job A - depends on Job C",
-            "command": "python3 /home/sjoshi/claudelab/maestro/test_scripts/success_script.py",
+            "command": "python3 /home/sjoshi/claudelab/executioner/test_scripts/success_script.py",
             "dependencies": ["job_c"],
             "timeout": 10,
             "env_variables": {
@@ -21,7 +21,7 @@
         {
             "id": "job_b",
             "description": "Job B - depends on Job A",
-            "command": "python3 /home/sjoshi/claudelab/maestro/test_scripts/success_script.py",
+            "command": "python3 /home/sjoshi/claudelab/executioner/test_scripts/success_script.py",
             "dependencies": ["job_a"],
             "timeout": 10,
             "env_variables": {
@@ -31,7 +31,7 @@
         {
             "id": "job_c",
             "description": "Job C - depends on Job B (creating a circular dependency)",
-            "command": "python3 /home/sjoshi/claudelab/maestro/test_scripts/success_script.py",
+            "command": "python3 /home/sjoshi/claudelab/executioner/test_scripts/success_script.py",
             "dependencies": ["job_b"],
             "timeout": 10,
             "env_variables": {

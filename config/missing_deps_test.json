@@ -11,7 +11,7 @@
         {
             "id": "job1",
             "description": "Valid job",
-            "command": "python3 /home/sjoshi/claudelab/maestro/test_scripts/success_script.py",
+            "command": "python3 /home/sjoshi/claudelab/executioner/test_scripts/success_script.py",
             "timeout": 10,
             "env_variables": {
                 "TEST_JOB": "job1"
@@ -20,7 +20,7 @@
         {
             "id": "job2",
             "description": "Job with missing dependency",
-            "command": "python3 /home/sjoshi/claudelab/maestro/test_scripts/success_script.py",
+            "command": "python3 /home/sjoshi/claudelab/executioner/test_scripts/success_script.py",
             "dependencies": ["non_existent_job"],
             "timeout": 10,
             "env_variables": {
@@ -30,7 +30,7 @@
         {
             "id": "job3",
             "description": "Job with both valid and missing dependencies",
-            "command": "python3 /home/sjoshi/claudelab/maestro/test_scripts/success_script.py",
+            "command": "python3 /home/sjoshi/claudelab/executioner/test_scripts/success_script.py",
             "dependencies": ["job1", "another_missing_job"],
             "timeout": 10,
             "env_variables": {
