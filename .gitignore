@@ -1,3 +1,6 @@
 logs
 jobs/__pycache__
-__
+*.swp
+*.swo
+*.swx
+*~
