@@ -120,6 +120,7 @@ class JobExecutioner:
         self.job_queue: Queue = Queue()
         self.completed_jobs: Set[str] = set()
         self.failed_jobs: Set[str] = set()
+        self.failed_job_reasons: Dict[str, str] = {}
         self.queued_jobs: Set[str] = set()
         self.active_jobs: Set[str] = set()
         self.future_to_job_id: Dict[Future, str] = {}
@@ -194,7 +195,7 @@ class JobExecutioner:
             self.logger.error(f"General error in dependency plugin loading: {e}")
 
     def _setup_logging(self):
-        """Configure logging with rotation and console output."""
+        """Configure logging with rotation, console output, and JSON log output."""
         self.master_log_path = os.path.join(Config.LOG_DIR, f"executioner.{self.application_name}.run-{self.run_id}.log")
         master_log_path = self.master_log_path
         app_log_path = os.path.join(Config.LOG_DIR, f"executioner.{self.application_name}.log")
@@ -227,6 +228,7 @@ class JobExecutioner:
         def record_factory(*args, **kwargs):
             record = old_factory(*args, **kwargs)
             record.run_id = self.run_id
+            record.application_name = self.application_name
             return record
         logging.setLogRecordFactory(record_factory)
         self.logger = logging.getLogger('executioner')
@@ -235,9 +237,6 @@ class JobExecutioner:
         self.logger.addHandler(file_handler)
         self.logger.addHandler(app_file_handler)
         self.logger.addHandler(console_handler)
-        self.logger.setLevel(logging.INFO)
-        self.logger.propagate = False
-        #SSJ self.logger.info(f"Logging initialized for {self.application_name} (Run #{self.run_id})")
 
     def _get_new_run_id(self) -> int:
         try:
@@ -660,7 +659,7 @@ class JobExecutioner:
         except OSError as e:
             job_logger.error(f"Error killing process: {e}")
 
-    def _execute_job(self, job_id: str) -> bool:
+    def _execute_job(self, job_id: str, return_reason: bool = False):
         job = self.jobs[job_id]
         runner = JobRunner(
             job_id=job_id,
@@ -677,7 +676,10 @@ class JobExecutioner:
             get_last_exit_code=self._get_last_exit_code,
             setup_job_logger=self._setup_job_logger
         )
-        return runner.run(dry_run=self.dry_run)
+        result, fail_reason = runner.run(dry_run=self.dry_run, continue_on_error=self.continue_on_error, return_reason=True)
+        if return_reason:
+            return result, fail_reason
+        return result
 
     def _run_dry(self, resume_run_id=None, resume_failed_only=False):
         self.logger.info(f"Starting dry run - printing execution plan")
@@ -780,7 +782,7 @@ class JobExecutioner:
         self.continue_on_error = continue_on_error
         self.dry_run = dry_run
         self.skip_jobs = set(skip_jobs or [])
-        self.start_time = datetime.datetime.now()
+        self.start_time = None
         self.interrupted = False
         divider = f"{Config.COLOR_CYAN}{'='*90}{Config.COLOR_RESET}"
         dry_run_text = " [DRY RUN]" if dry_run else ""
@@ -806,6 +808,7 @@ class JobExecutioner:
                 self.exit_code = 1
                 self._print_abort_summary("FAILED", reason="Missing dependencies detected", missing_deps=missing_dependencies)
                 return self.exit_code
+        self.start_time = datetime.datetime.now()
         print(f"{divider}")
         print(f"{Config.COLOR_CYAN}{f'STARTING EXECUTION Application {self.application_name} - RUN #{self.run_id}{dry_run_text}{parallel_text}':^90}{Config.COLOR_RESET}")
         print(f"{divider}")
@@ -904,10 +907,11 @@ class JobExecutioner:
             for job_id in self.failed_jobs:
                 job_log_path = self.job_log_paths.get(job_id, None)
                 desc = self.jobs[job_id].get('description', '')
+                reason = self.failed_job_reasons.get(job_id, '')
                 if job_log_path:
-                    print(f"  - {Config.COLOR_RED}{job_id}{Config.COLOR_RESET}: {desc}\n      Log: {job_log_path}")
+                    print(f"  - {Config.COLOR_RED}{job_id}{Config.COLOR_RESET}: {desc}\n      Reason: {reason}\n      Log: {job_log_path}")
                 else:
-                    print(f"  - {Config.COLOR_RED}{job_id}{Config.COLOR_RESET}: {desc}")
+                    print(f"  - {Config.COLOR_RED}{job_id}{Config.COLOR_RESET}: {desc}\n      Reason: {reason}")
         print(f"{divider}")
         print("\n")
         return self.exit_code
@@ -990,11 +994,15 @@ class JobExecutioner:
                 self.logger.warning(f"Job {job_id} has non-existent dependencies: {missing_deps}")
                 if self.continue_on_error:
                     self.logger.warning(f"Skipping job {job_id} due to missing dependencies")
+                    self.failed_jobs.add(job_id)
+                    self.failed_job_reasons[job_id] = f"Missing dependencies: {', '.join(missing_deps)}"
                     continue
                 self.logger.error(f"Job {job_id} has missing dependencies. Stopping.")
+                self.failed_jobs.add(job_id)
+                self.failed_job_reasons[job_id] = f"Missing dependencies: {', '.join(missing_deps)}"
                 self.exit_code = 1
                 break
-            job_success = self._execute_job(job_id)
+            job_success, fail_reason = self._execute_job(job_id, return_reason=True)
             if self.interrupted:
                 self.logger.info("Execution interrupted, stopping gracefully.")
                 break
@@ -1003,7 +1011,8 @@ class JobExecutioner:
                     self.completed_jobs.add(job_id)
                 else:
                     self.failed_jobs.add(job_id)
-                    self._mark_dependent_jobs_failed(job_id)
+                    self.failed_job_reasons[job_id] = fail_reason or "Unknown failure"
+                    self._mark_dependent_jobs_failed(job_id, fail_reason or "Dependency failed")
                     if not self.continue_on_error:
                         self.exit_code = 1
                         break
@@ -1030,13 +1039,14 @@ class JobExecutioner:
                             continue
                         self.active_jobs.discard(job_id)
                         try:
-                            job_success = future.result()
+                            job_success, fail_reason = future.result()
                             if job_success:
                                 self.completed_jobs.add(job_id)
                                 just_completed_jobs.add(job_id)
                             else:
                                 self.failed_jobs.add(job_id)
-                                self._mark_dependent_jobs_failed(job_id)
+                                self.failed_job_reasons[job_id] = fail_reason or "Unknown failure"
+                                self._mark_dependent_jobs_failed(job_id, fail_reason or "Dependency failed")
                                 if not self.continue_on_error:
                                     self.exit_code = 1
                                     self.interrupted = True
@@ -1045,7 +1055,7 @@ class JobExecutioner:
                         except Exception as e:
                             self.logger.error(f"Job {job_id} raised exception: {e}")
                             self.failed_jobs.add(job_id)
-                            self._mark_dependent_jobs_failed(job_id)
+                            self._mark_dependent_jobs_failed(job_id, f"Exception: {e}")
                             if not self.continue_on_error:
                                 self.exit_code = 1
                                 self.interrupted = True
@@ -1123,14 +1133,16 @@ class JobExecutioner:
                             self.active_jobs.discard(job_id)
                             pending_futures.discard(future)
                             try:
-                                job_success = future.result()
+                                job_success, fail_reason = future.result()
                                 if job_success:
                                     self.completed_jobs.add(job_id)
                                 else:
                                     self.failed_jobs.add(job_id)
+                                    self.failed_job_reasons[job_id] = fail_reason or "Unknown failure"
                             except Exception as e:
                                 self.logger.error(f"Exception in job {job_id} during shutdown: {e}")
                                 self.failed_jobs.add(job_id)
+                                self.failed_job_reasons[job_id] = f"Exception: {e}"
                 except Exception as e:
                     self.logger.error(f"Error waiting for jobs during shutdown: {e}")
                     break
@@ -1147,7 +1159,7 @@ class JobExecutioner:
                             self.logger.warning(f"Job {job_id} abandoned during shutdown")
         return iteration_count
 
-    def _mark_dependent_jobs_failed(self, failed_job_id: str):
+    def _mark_dependent_jobs_failed(self, failed_job_id: str, reason: str = None):
         with self.lock:
             visited = set()
             queue = [failed_job_id]
@@ -1161,6 +1173,7 @@ class JobExecutioner:
                         if job_id not in self.completed_jobs and job_id not in self.skip_jobs:
                             self.logger.debug(f"Marking job {job_id} as failed due to dependency on {current_job}")
                             self.failed_jobs.add(job_id)
+                            self.failed_job_reasons[job_id] = f"Dependency failed: {current_job}" if not reason else reason
                             queue.append(job_id)
 
     def _queue_dependent_jobs(self, completed_job_id: str):

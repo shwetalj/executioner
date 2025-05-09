@@ -52,7 +52,7 @@
             "description": "Job that times out",
             "command": "python3 /home/sjoshi/claudelab/executioner/test_scripts/timeout_script.py",
             "dependencies": ["success_job2"],
-            "timeout": 100,
+            "timeout": 10,
             "env_variables": {
                 "TEST_JOB": "timeout_job"
             }

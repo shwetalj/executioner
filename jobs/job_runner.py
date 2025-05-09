@@ -23,9 +23,9 @@ class JobRunner:
         self.get_last_exit_code = get_last_exit_code
         self.setup_job_logger = setup_job_logger
 
-    def run(self, dry_run=False):
+    def run(self, dry_run=False, continue_on_error=False, return_reason=False):
         command = self.job["command"]
-        # Determine timeout: job['timeout'] > config['default_timeout'] > 600
+        # Determine timeout: job['timeout'] > config['default_timeout'] > 10800
         timeout = self.job.get("timeout")
         timeout_source = None
         if timeout is not None:
@@ -35,14 +35,14 @@ class JobRunner:
             if timeout is not None:
                 timeout_source = f"default timeout={timeout}"
         if timeout is None:
-            timeout = 600
-            timeout_source = "default timeout=600"
+            timeout = 10800
+            timeout_source = "default timeout=10800"
         else:
             try:
                 timeout = int(timeout)
             except Exception:
-                timeout = 600
-                timeout_source = "default timeout=600"
+                timeout = 10800
+                timeout_source = "default timeout=10800"
         max_retries = self.job.get("max_retries", self.config.get("default_max_retries", 0))
         retry_delay = self.job.get("retry_delay", self.config.get("default_retry_delay", 30))
         retry_backoff = self.job.get("retry_backoff", self.config.get("default_retry_backoff", 1.5))
@@ -53,16 +53,21 @@ class JobRunner:
         current_retry = 0
         retry_history = []
         job_logger, job_file_handler, job_log_path = self.setup_job_logger(self.job_id)
+        fail_reason = None
         try:
             # User-facing job start
             self.main_logger.info(f"Starting job '{self.job_id}'")
             self.main_logger.info(f"Running job: {self.job_id} Command: {command}")
             if dry_run:
                 print(f"[DRY RUN] Would execute job: {self.job_id} - Command: {command[:60]}{'...' if len(command) > 60 else ''}")
+                if return_reason:
+                    return True, None
                 return True
             if not command.strip():
                 self.main_logger.info(f"Job {self.job_id}: SUCCESS (empty command)")
                 self.update_job_status(self.job_id, "SUCCESS")
+                if return_reason:
+                    return True, None
                 return True
             # Pre-checks
             pre_checks = self.job.get("pre_checks", [])
@@ -76,6 +81,9 @@ class JobRunner:
                         msg = f"Job {self.job_id} pre_check: {name}({args_str}) - failed (unknown check)"
                         self.main_logger.error(msg)
                         self.update_job_status(self.job_id, "PRECHECK_FAILED")
+                        fail_reason = f"Pre-check failed: {name} (unknown check)"
+                        if return_reason:
+                            return False, fail_reason
                         return False
                     try:
                         result = func(**params)
@@ -85,11 +93,17 @@ class JobRunner:
                         if not result:
                             self.main_logger.error(f"Pre-checks failed for job {self.job_id}. Skipping job execution.")
                             self.update_job_status(self.job_id, "PRECHECK_FAILED")
+                            fail_reason = f"Pre-check failed: {name}"
+                            if return_reason:
+                                return False, fail_reason
                             return False
                     except Exception as e:
                         msg = f"Job {self.job_id} pre_check: {name}({args_str}) - failed (error: {e})"
                         self.main_logger.error(msg)
                         self.update_job_status(self.job_id, "PRECHECK_FAILED")
+                        fail_reason = f"Pre-check error: {name} ({e})"
+                        if return_reason:
+                            return False, fail_reason
                         return False
             attempt = 1
             start_time = time.time()
@@ -97,7 +111,7 @@ class JobRunner:
             while True:
                 if total_retry_time > max_retry_time and attempt > 1:
                     self.main_logger.warning(f"Job {self.job_id} exceeded maximum retry time. Giving up after {attempt-1} retries.")
-                    return False
+                    return False, fail_reason
                 if attempt > 1:
                     retry_msg = f"Retry attempt {attempt}/{max_retries+1} for job {self.job_id}"
                     self.main_logger.info(retry_msg)
@@ -108,10 +122,12 @@ class JobRunner:
                 except Exception as e:
                     status = "ERROR"
                     job_logger.error(f"Exception during job execution: {e}")
+                    fail_reason = f"Exception during execution: {e}"
+                duration = round(time.time() - attempt_start, 2)
                 attempt_info = {
                     "attempt": attempt,
                     "timestamp": datetime.datetime.now().isoformat(),
-                    "duration": round(time.time() - attempt_start, 2) if 'duration' in locals() else None,
+                    "duration": duration,
                     "success": status == "SUCCESS",
                     "exit_code": exit_code
                 }
@@ -143,16 +159,26 @@ class JobRunner:
                                 self.main_logger.error(msg)
                                 post_failed = True
                     if post_failed:
-                        msg = f"Job {self.job_id} failed. Stopping execution."
+                        msg = f"Job {self.job_id} failed after {duration:.2f} seconds."
                         self.main_logger.error(msg)
+                        fail_reason = "Post-check failed"
+                        if not continue_on_error:
+                            self.main_logger.error("Stopping execution.")
+                        if return_reason:
+                            return False, fail_reason
                         return False
-                    duration_val = attempt_info['duration'] if attempt_info['duration'] is not None else 0.0
-                    msg = f"Job '{self.job_id}' completed successfully in {duration_val:.2f} seconds"
+                    msg = f"Job '{self.job_id}' completed successfully in {duration:.2f} seconds"
                     self.main_logger.info(msg)
                     self.update_job_status(self.job_id, "SUCCESS")
+                    if return_reason:
+                        return True, None
                     return True
                 if status == "TIMEOUT":
-                    # Timeout already logged, do not log generic failure
+                    # Timeout already logged, but append duration for clarity
+                    self.main_logger.error(f"Job {self.job_id} duration before timeout: {duration:.2f} seconds.")
+                    fail_reason = f"Timed out after {timeout} seconds"
+                    if return_reason:
+                        return False, fail_reason
                     return False
                 should_retry = False
                 last_status = "FAILED"
@@ -164,9 +190,17 @@ class JobRunner:
                     should_retry = True
                 current_retry += 1
                 if current_retry > max_retries:
-                    self.main_logger.error(f"Job {self.job_id} failed. Stopping execution.")
+                    self.main_logger.error(f"Job {self.job_id} failed after {duration:.2f} seconds.")
+                    fail_reason = f"Script failed (exit code != 0)"
+                    if not continue_on_error:
+                        self.main_logger.error("Stopping execution.")
+                    if return_reason:
+                        return False, fail_reason
                     return False
                 if not should_retry:
+                    fail_reason = f"Script failed (exit code != 0)"
+                    if return_reason:
+                        return False, fail_reason
                     return False
                 base_delay = retry_delay * (retry_backoff ** (current_retry - 1))
                 if jitter > 0:
