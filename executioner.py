@@ -86,7 +86,13 @@ SAMPLE_CONFIG = """{
             "env_variables": {
                 "API_KEY": "your-api-key",
                 "DOWNLOAD_PATH": "/data/raw"
-            }
+            },
+            "pre_checks": [
+                {"name": "check_file_exists", "params": {"path": "/data/raw"}}
+            ],
+            "post_checks": [
+                {"name": "check_no_ora_errors", "params": {"log_file": "./logs/output.log"}}
+            ]
         },
         {
             "id": "clean_data",
@@ -96,14 +102,22 @@ SAMPLE_CONFIG = """{
             "timeout": 600,
             "env_variables": {
                 "DEBUG": "true"
-            }
+            },
+            "pre_checks": [
+                {"name": "check_file_exists", "params": {"path": "/data/raw"}}
+            ],
+            "post_checks": [
+                {"name": "check_no_ora_errors", "params": {"log_file": "./logs/clean.log"}}
+            ]
         },
         {
             "id": "generate_report",
             "description": "Generate report",
             "command": "python generate_report.py",
             "dependencies": ["clean_data"],
-            "timeout": 900
+            "timeout": 900,
+            "pre_checks": [],
+            "post_checks": []
         }
     ]
 }"""
@@ -155,8 +169,13 @@ Notes:
     
     # Handle --sample-config flag
     if args.sample_config:
-        print("Sample Configuration:")
+        divider = "=" * 80
+        print(f"\n{divider}")
+        print(f"{'SAMPLE CONFIGURATION':^80}")
+        print(f"{divider}")
         print(SAMPLE_CONFIG)
+        print("-" * 80)
+        print("Copy and modify as needed for your own pipeline.")
         sys.exit(0)
         
     init_db()

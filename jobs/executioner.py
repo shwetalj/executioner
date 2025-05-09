@@ -785,9 +785,6 @@ class JobExecutioner:
         divider = f"{Config.COLOR_CYAN}{'='*90}{Config.COLOR_RESET}"
         dry_run_text = " [DRY RUN]" if dry_run else ""
         parallel_text = f" [PARALLEL: {self.max_workers} workers]" if self.parallel else " [SEQUENTIAL]"
-        print(f"{divider}")
-        print(f"{Config.COLOR_CYAN}{f'STARTING EXECUTION Application {self.application_name} - RUN #{self.run_id}{dry_run_text}{parallel_text}':^90}{Config.COLOR_RESET}")
-        print(f"{divider}")
         if dry_run:
             try:
                 return self._run_dry(resume_run_id, resume_failed_only)
@@ -798,6 +795,7 @@ class JobExecutioner:
         if self._has_circular_dependencies():
             self.logger.error("Circular dependencies detected in job configuration")
             self.exit_code = 1
+            self._print_abort_summary("FAILED", reason="Circular dependencies detected")
             return self.exit_code
         missing_dependencies = self._check_missing_dependencies()
         if missing_dependencies:
@@ -806,7 +804,11 @@ class JobExecutioner:
             if not continue_on_error:
                 self.logger.error("Missing dependencies detected. Aborting.")
                 self.exit_code = 1
+                self._print_abort_summary("FAILED", reason="Missing dependencies detected", missing_deps=missing_dependencies)
                 return self.exit_code
+        print(f"{divider}")
+        print(f"{Config.COLOR_CYAN}{f'STARTING EXECUTION Application {self.application_name} - RUN #{self.run_id}{dry_run_text}{parallel_text}':^90}{Config.COLOR_RESET}")
+        print(f"{divider}")
         previous_job_statuses = {}
         if resume_run_id is not None:
             previous_job_statuses = self._get_previous_run_status(resume_run_id)
@@ -909,6 +911,29 @@ class JobExecutioner:
         print(f"{divider}")
         print("\n")
         return self.exit_code
+
+    def _print_abort_summary(self, status, reason=None, missing_deps=None):
+        divider = f"{Config.COLOR_CYAN}{'='*40}{Config.COLOR_RESET}"
+        print(f"{divider}")
+        print(f"{Config.COLOR_CYAN}{'EXECUTION SUMMARY':^40}{Config.COLOR_RESET}")
+        print(f"{divider}")
+        print(f"{Config.COLOR_CYAN}Application:{Config.COLOR_RESET} {self.application_name}")
+        print(f"{Config.COLOR_CYAN}Run ID:{Config.COLOR_RESET} {self.run_id}")
+        print(f"{Config.COLOR_CYAN}Status:{Config.COLOR_RESET} {Config.COLOR_RED}{status}{Config.COLOR_RESET}")
+        print(f"{Config.COLOR_CYAN}Start Time:{Config.COLOR_RESET} {self.start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"{Config.COLOR_CYAN}End Time:{Config.COLOR_RESET} {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"{Config.COLOR_CYAN}Duration:{Config.COLOR_RESET} 0:00:00")
+        print(f"{Config.COLOR_CYAN}Jobs Completed:{Config.COLOR_RESET} 0")
+        print(f"{Config.COLOR_CYAN}Jobs Failed:{Config.COLOR_RESET} 0")
+        print(f"{Config.COLOR_CYAN}Jobs Skipped:{Config.COLOR_RESET} 0")
+        if reason:
+            print(f"\n{Config.COLOR_RED}Execution aborted: {reason}{Config.COLOR_RESET}")
+        if missing_deps:
+            print(f"\n{Config.COLOR_CYAN}Missing Dependencies:{Config.COLOR_RESET}")
+            for job_id, deps in missing_deps.items():
+                print(f"  - {Config.COLOR_RED}{job_id}{Config.COLOR_RESET}: {', '.join(deps)}")
+        print(f"{divider}")
+        print("\n")
 
     def _check_missing_dependencies(self):
         result = {}
