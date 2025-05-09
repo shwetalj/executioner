@@ -11,7 +11,7 @@
         {
             "id": "job1",
             "description": "First basic job",
-            "command": "python3 /home/sjoshi/claudelabs/maestro/test_scripts/success_script.py",
+            "command": "python3 /home/sjoshi/claudelab/executioner/test_scripts/success_script.py",
             "timeout": 10,
             "env_variables": {
                 "TEST_JOB": "job1",
@@ -21,7 +21,7 @@
         {
             "id": "job2",
             "description": "Second job depending on first job",
-            "command": "python3 /home/sjoshi/claudelabs/maestro/test_scripts/success_script.py",
+            "command": "python3 /home/sjoshi/claudelab/executioner/test_scripts/success_script.py",
             "dependencies": ["job1"],
             "timeout": 10,
             "env_variables": {
@@ -32,7 +32,7 @@
         {
             "id": "job3",
             "description": "Third job depending on second job",
-            "command": "python3 /home/sjoshi/claudelabs/maestro/test_scripts/success_script.py",
+            "command": "python3 /home/sjoshi/claudelab/executioner/test_scripts/success_script.py",
             "dependencies": ["job2"],
             "timeout": 10,
             "env_variables": {

@@ -216,7 +216,7 @@ class JobExecutioner:
         self.logger.addHandler(console_handler)
         self.logger.setLevel(logging.INFO)
         self.logger.propagate = False
-        self.logger.info(f"Logging initialized for {self.application_name} (Run #{self.run_id})")
+        #SSJ self.logger.info(f"Logging initialized for {self.application_name} (Run #{self.run_id})")
 
     def _get_new_run_id(self) -> int:
         try:
@@ -1416,9 +1416,9 @@ Skipped Jobs: {len(self.skip_jobs)}
         duration = self.end_time - self.start_time
         duration_str = str(duration).split('.')[0]
         end_date = self.end_time.strftime("%Y-%m-%d %H:%M:%S")
-        divider = f"{Config.COLOR_CYAN}{'='*50}{Config.COLOR_RESET}"
+        divider = f"{Config.COLOR_CYAN}{'='*40}{Config.COLOR_RESET}"
         print(f"\n{divider}")
-        print(f"{Config.COLOR_CYAN}{'DRY RUN EXECUTION SUMMARY':^50}{Config.COLOR_RESET}")
+        print(f"{Config.COLOR_CYAN}{'DRY RUN EXECUTION SUMMARY':^40}{Config.COLOR_RESET}")
         print(f"{divider}")
         print(f"{Config.COLOR_CYAN}Application:{Config.COLOR_RESET} {self.application_name}")
         print(f"{Config.COLOR_CYAN}Run ID:{Config.COLOR_RESET} {self.run_id}")
@@ -1429,6 +1429,7 @@ Skipped Jobs: {len(self.skip_jobs)}
         print(f"{Config.COLOR_CYAN}Would Execute:{Config.COLOR_RESET} {Config.COLOR_DARK_GREEN}{len(self.jobs) - len(self.skip_jobs)}{Config.COLOR_RESET}")
         print(f"{Config.COLOR_CYAN}Would Skip:{Config.COLOR_RESET} {Config.COLOR_YELLOW if len(self.skip_jobs) > 0 else ''}{len(self.skip_jobs)}{Config.COLOR_RESET}")
         print(f"{divider}")
+        print("\n")
         self.logger.info(f"Dry run completed for run ID: {self.run_id}")
         return 0
 
@@ -1457,11 +1458,11 @@ Skipped Jobs: {len(self.skip_jobs)}
         self.skip_jobs = set(skip_jobs or [])
         self.start_time = datetime.datetime.now()
         self.interrupted = False
-        divider = f"{Config.COLOR_CYAN}{'='*50}{Config.COLOR_RESET}"
+        divider = f"{Config.COLOR_CYAN}{'='*90}{Config.COLOR_RESET}"
         dry_run_text = " [DRY RUN]" if dry_run else ""
         parallel_text = f" [PARALLEL: {self.max_workers} workers]" if self.parallel else " [SEQUENTIAL]"
-        print(f"\n{divider}")
-        print(f"{Config.COLOR_CYAN}{f'STARTING EXECUTION RUN #{self.run_id}{dry_run_text}{parallel_text}':^50}{Config.COLOR_RESET}")
+        print(f"{divider}")
+        print(f"{Config.COLOR_CYAN}{f'STARTING EXECUTION Application {self.application_name} - RUN #{self.run_id}{dry_run_text}{parallel_text}':^90}{Config.COLOR_RESET}")
         print(f"{divider}")
         if dry_run:
             try:
@@ -1559,9 +1560,9 @@ Skipped Jobs: {len(self.skip_jobs)}
         end_date = self.end_time.strftime("%Y-%m-%d %H:%M:%S")
         status = "SUCCESS" if self.exit_code == 0 else "FAILED"
         status_color = Config.COLOR_DARK_GREEN if self.exit_code == 0 else Config.COLOR_RED
-        divider = f"{Config.COLOR_CYAN}{'='*50}{Config.COLOR_RESET}"
-        print(f"\n{divider}")
-        print(f"{Config.COLOR_CYAN}{'EXECUTION SUMMARY':^50}{Config.COLOR_RESET}")
+        divider = f"{Config.COLOR_CYAN}{'='*40}{Config.COLOR_RESET}"
+        print(f"{divider}")
+        print(f"{Config.COLOR_CYAN}{'EXECUTION SUMMARY':^40}{Config.COLOR_RESET}")
         print(f"{divider}")
         print(f"{Config.COLOR_CYAN}Application:{Config.COLOR_RESET} {self.application_name}")
         print(f"{Config.COLOR_CYAN}Run ID:{Config.COLOR_RESET} {self.run_id}")
@@ -1577,6 +1578,7 @@ Skipped Jobs: {len(self.skip_jobs)}
             for job_id in self.failed_jobs:
                 print(f"  - {Config.COLOR_RED}{job_id}{Config.COLOR_RESET}: {self.jobs[job_id].get('description', '')}")
         print(f"{divider}")
+        print("\n")
         return self.exit_code
 
     def _check_missing_dependencies(self):
