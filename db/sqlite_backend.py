@@ -6,6 +6,8 @@ import json
 from contextlib import contextmanager
 from config.loader import Config
 
+logger = logging.getLogger('executioner')
+
 @contextmanager
 def db_connection():
     """Context manager for database connections to ensure proper cleanup."""
@@ -16,22 +18,22 @@ def db_connection():
         conn.execute("PRAGMA busy_timeout = 3000")  # 3 seconds
         yield conn
     except sqlite3.Error as e:
-        logging.getLogger('executioner').error(f"Database error: {e}")
+        logger.error(f"Database error: {e}")
         raise
     finally:
         if conn:
             try:
                 conn.close()
             except Exception as e:
-                logging.getLogger('executioner').error(f"Error closing database connection: {e}")
+                logger.error(f"Error closing database connection: {e}")
 
-def init_db():
+def init_db(verbose=False):
     """Initialize the SQLite database with enhanced schema versioning and migration support."""
     import hashlib  # Import for creating migration hashes
-    # Ensure the directory for the database exists
     db_dir = os.path.dirname(os.path.abspath(Config.DB_FILE))
     os.makedirs(db_dir, exist_ok=True)
-    print(f"Initializing database at {Config.DB_FILE}")
+    log_level = logging.INFO if verbose else logging.DEBUG
+    logger.log(log_level, f"Initializing database at {Config.DB_FILE}")
     db_exists = os.path.exists(Config.DB_FILE)
     if db_exists:
         try:
@@ -42,7 +44,7 @@ def init_db():
                     cursor.execute("SELECT MAX(version) FROM schema_version")
                     version = cursor.fetchone()[0]
                     if version is not None:
-                        print(f"Database already initialized (schema version {version})")
+                        logger.log(log_level, f"Database already initialized (schema version {version})")
                         return
         except sqlite3.Error:
             pass
@@ -144,11 +146,11 @@ def init_db():
                         cursor.execute("SELECT last_insert_rowid()")
                         migration_id = cursor.fetchone()[0]
                 except sqlite3.Error as e:
-                    print(f"Warning: Could not record migration start: {e}")
+                    logger.warning(f"Warning: Could not record migration start: {e}")
             try:
                 for version, description, statements, data_migration, rollback in migrations:
                     if version > current_version:
-                        print(f"Applying database migration v{version}: {description}")
+                        logger.info(f"Applying database migration v{version}: {description}")
                         migration_hash = hashlib.md5(str(statements).encode()).hexdigest()
                         for statement in statements:
                             try:
@@ -199,15 +201,15 @@ def init_db():
             row = cursor.fetchone()
             final_version = row[0] if row[0] is not None else 0
             if final_version > current_version:
-                print(f"Database migrated from version {current_version} to {final_version}")
+                logger.info(f"Database migrated from version {current_version} to {final_version}")
             else:
-                print(f"Database schema is up to date (version {final_version})")
-            print(f"Database initialization completed successfully")
+                logger.info(f"Database schema is up to date (version {final_version})")
+            logger.info(f"Database initialization completed successfully")
     except sqlite3.Error as e:
         try:
             if 'conn' in locals() and conn:
                 conn.rollback()
         except:
             pass
-        print(f"Database initialization error: {e}")
+        logger.error(f"Database initialization error: {e}")
         sys.exit(1) 

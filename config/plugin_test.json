@@ -1,12 +1,20 @@
 {
-    "application_name": "plugin_test",
+    "application_name": "plugin_test_app",
     "email_address": "test@example.com",
-    "dependency_plugins": ["custom_plugin.py"],
+    "dependency_plugins": [
+        {
+            "name": "custom_dependency",
+            "path": "jobs/plugins/custom_dependency.py"
+        }
+    ],
     "jobs": [
         {
-            "id": "job1",
-            "command": "echo 'Plugin test'",
-            "timeout": 5
+            "id": "job_with_plugin_check",
+            "description": "Job that uses a custom dependency plugin in pre_checks",
+            "command": "echo 'Hello from plugin job'",
+            "pre_checks": [
+                {"name": "custom_dependency", "params": {"foo": "bar"}}
+            ]
         }
     ]
 } 

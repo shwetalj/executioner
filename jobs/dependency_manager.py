@@ -9,29 +9,40 @@ class DependencyManager:
             job["id"]: frozenset(job.get("dependencies", [])) for job in jobs.values()
         }
         self.dependency_resolvers = {}
-        if self.dependency_plugins:
-            self.logger.info(f"Found {len(self.dependency_plugins)} dependency plugins to load")
+        # if self.dependency_plugins:
+        #     self.logger.info(f"Found {len(self.dependency_plugins)} dependency plugins to load")
 
     def load_dependency_plugins(self):
         import importlib.util
         try:
-            for plugin_path in self.dependency_plugins:
-                self.logger.info(f"Loading dependency plugin: {plugin_path}")
+            for entry in self.dependency_plugins:
+                # Support both dict (new) and string (legacy)
+                if isinstance(entry, dict):
+                    plugin_path = entry.get('path')
+                    plugin_name = entry.get('name')
+                else:
+                    plugin_path = entry
+                    plugin_name = os.path.splitext(os.path.basename(plugin_path))[0]
+                self.logger.info(f"Loading dependency plugin: name={plugin_name}, path={plugin_path}")
                 if not os.path.exists(plugin_path):
                     self.logger.error(f"Dependency plugin file not found: {plugin_path}")
                     continue
                 try:
-                    spec = importlib.util.spec_from_file_location("plugin", plugin_path)
+                    spec = importlib.util.spec_from_file_location(plugin_name, plugin_path)
                     if not spec or not spec.loader:
                         self.logger.error(f"Could not load spec for plugin: {plugin_path}")
                         continue
                     plugin = importlib.util.module_from_spec(spec)
                     spec.loader.exec_module(plugin)
+                    # Support both DependencyResolver._resolvers and PLUGIN_CLASS convention
                     if hasattr(plugin, 'DependencyResolver') and hasattr(plugin.DependencyResolver, '_resolvers'):
                         self.logger.info(f"Successfully loaded dependency plugin with {len(plugin.DependencyResolver._resolvers)} resolvers")
                         self.dependency_resolvers.update(plugin.DependencyResolver._resolvers)
+                    elif hasattr(plugin, 'PLUGIN_CLASS'):
+                        self.logger.info(f"Successfully loaded plugin class '{plugin.PLUGIN_CLASS.__name__}' for {plugin_name}")
+                        self.dependency_resolvers[plugin_name] = plugin.PLUGIN_CLASS
                     else:
-                        self.logger.warning(f"Plugin {plugin_path} does not contain expected DependencyResolver class")
+                        self.logger.warning(f"Plugin {plugin_path} does not contain expected DependencyResolver class or PLUGIN_CLASS")
                 except Exception as e:
                     self.logger.error(f"Error loading dependency plugin {plugin_path}: {e}")
         except Exception as e:

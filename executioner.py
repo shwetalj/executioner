@@ -223,7 +223,7 @@ Notes:
         print("Copy and modify as needed for your own pipeline.")
         sys.exit(0)
         
-    init_db()
+    init_db(verbose=args.verbose)
     executioner = JobExecutioner(args.config)
 
     # Store original job-level envs for each job before merging
@@ -238,11 +238,10 @@ Notes:
                 # Perform variable substitution in all job fields using merged envs
                 merged_envs = job["env_variables"]
                 executioner.jobs[job_id] = substitute_env_vars_in_obj(job, merged_envs)
-    # Show merged environment for each job if --visible, --debug, or --verbose is set
-    if args.visible or args.debug or args.verbose:
+    # Show merged environment for each job
+    if args.visible or args.debug:
         print("\n===== Environment Variables for Each Job (Precedence: CLI > Job > Application) =====")
         for job_id, job in executioner.jobs.items():
-            # Merge envs: app -> original job -> CLI
             merged_env = dict(executioner.app_env_variables)
             merged_env.update(original_job_envs.get(job_id, {}))
             if args.env:
@@ -250,6 +249,21 @@ Notes:
             print(f"\nJob: {job_id}")
             for k, v in merged_env.items():
                 print(f"  {k}={v}")
+        print("===============================================================================\n")
+    elif args.verbose:
+        # Print a summary only
+        job_count = len(executioner.jobs)
+        print(f"\n[INFO] {job_count} jobs loaded. Showing environment variables for the first job only (use --visible for all):")
+        first_job_id = next(iter(executioner.jobs))
+        merged_env = dict(executioner.app_env_variables)
+        merged_env.update(original_job_envs.get(first_job_id, {}))
+        if args.env:
+            merged_env.update(env_vars)
+        print(f"\nJob: {first_job_id}")
+        for k, v in merged_env.items():
+            print(f"  {k}={v}")
+        if job_count > 1:
+            print(f"...and {job_count-1} more jobs. Use --visible to see all.")
         print("===============================================================================\n")
 
     if args.sequential:
