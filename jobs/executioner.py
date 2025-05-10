@@ -7,6 +7,7 @@ import sys
 import datetime
 import os
 import re
+import glob
 
 import smtplib
 import socket
@@ -33,6 +34,7 @@ from jobs.job_runner import JobRunner
 from jobs.logger_factory import setup_logging
 from jobs.job_history_manager import JobHistoryManager
 from jobs.dependency_manager import DependencyManager
+from jobs.notification_manager import NotificationManager
 
 class JobExecutioner:
     def __init__(self, config_file: str):
@@ -88,6 +90,18 @@ class JobExecutioner:
         self.smtp_port = self.config.get("smtp_port", 587)  # Default to TLS port
         self.smtp_user = self.config.get("smtp_user", "")
         self.smtp_password = self.config.get("smtp_password", "")
+        # Notification manager
+        self.notification_manager = NotificationManager(
+            email_address=self.email_address,
+            email_on_success=self.email_on_success,
+            email_on_failure=self.email_on_failure,
+            smtp_server=self.smtp_server,
+            smtp_port=self.smtp_port,
+            smtp_user=self.smtp_user,
+            smtp_password=self.smtp_password,
+            application_name=self.application_name,
+            logger=self.logger
+        )
 
         # Execution settings
         self.parallel = self.config.get("parallel", False)
@@ -1178,5 +1192,34 @@ class JobExecutioner:
         except (sqlite3.Error, ValueError) as e:
             self.logger.debug(f"Could not retrieve exit code for job {job_id}: {e}")
             return None
+
+    def _send_notification(self, success: bool):
+        """Send an email notification using NotificationManager."""
+        status = "SUCCESS" if success else "FAILED"
+        duration = self.end_time - self.start_time if self.end_time and self.start_time else None
+        duration_str = str(duration).split('.')[0] if duration else "N/A"
+        summary = (
+            f"Application: {self.application_name}\n"
+            f"Run ID: {self.run_id}\n"
+            f"Status: {status}\n"
+            f"Start Time: {self.start_time.strftime('%Y-%m-%d %H:%M:%S') if self.start_time else 'N/A'}\n"
+            f"End Time: {self.end_time.strftime('%Y-%m-%d %H:%M:%S') if self.end_time else 'N/A'}\n"
+            f"Duration: {duration_str}\n"
+            f"Jobs Completed: {len(self.completed_jobs)}\n"
+            f"Jobs Failed: {len(self.failed_jobs)}\n"
+            f"Jobs Skipped: {len(self.skip_jobs)}\n"
+        )
+        if self.failed_jobs:
+            failed_jobs_str = ", ".join(self.failed_jobs)
+            summary += f"\nFailed Jobs: {failed_jobs_str}"
+        # Collect all log files for this run
+        log_pattern = os.path.join(Config.LOG_DIR, f"executioner.{self.application_name}.job-*.run-{self.run_id}.log")
+        attachments = glob.glob(log_pattern)
+        self.notification_manager.send_notification(
+            success=success,
+            run_id=self.run_id,
+            summary=summary,
+            attachments=attachments
+        )
 
 # ... existing code ... 
