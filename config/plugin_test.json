@@ -1,0 +1,12 @@
+{
+    "application_name": "plugin_test",
+    "email_address": "test@example.com",
+    "dependency_plugins": ["custom_plugin.py"],
+    "jobs": [
+        {
+            "id": "job1",
+            "command": "echo 'Plugin test'",
+            "timeout": 5
+        }
+    ]
+} 

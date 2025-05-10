@@ -1,0 +1,18 @@
+{
+    "application_name": "smtp_invalid_test",
+    "email_address": "shwetal.joshi@gmail.com",
+    "email_on_success": true,
+    "email_on_failure": true,
+    "smtp_server": "invalid.smtp.server",
+    "smtp_port": 9999,
+    "smtp_user": "invalid_user",
+    "smtp_password": "invalid_password",
+    "env_variables": {},
+    "jobs": [
+        {
+            "id": "job1",
+            "command": "echo 'Testing SMTP failure'",
+            "timeout": 5
+        }
+    ]
+} 

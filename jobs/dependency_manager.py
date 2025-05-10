@@ -11,7 +11,6 @@ class DependencyManager:
         self.dependency_resolvers = {}
         if self.dependency_plugins:
             self.logger.info(f"Found {len(self.dependency_plugins)} dependency plugins to load")
-            self.load_dependency_plugins()
 
     def load_dependency_plugins(self):
         import importlib.util

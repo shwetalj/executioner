@@ -1,0 +1,5 @@
+{
+    "application_name": "invalid_config_bad_types",
+    "email_address": "test@example.com",
+    "jobs": "this should be a list, not a string"
+} 

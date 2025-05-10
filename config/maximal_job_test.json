@@ -1,0 +1,24 @@
+{
+    "application_name": "maximal_job_test",
+    "email_address": "test@example.com",
+    "env_variables": {"APP_LEVEL": "yes"},
+    "jobs": [
+        {
+            "id": "job1",
+            "description": "Maximal job",
+            "command": "echo 'Maximal job'",
+            "timeout": 20,
+            "max_retries": 2,
+            "retry_delay": 1,
+            "retry_backoff": 2.0,
+            "env_variables": {"JOB_LEVEL": "yes"},
+            "dependencies": [],
+            "pre_checks": [
+                {"name": "check_file_exists", "params": {"path": "input.sql"}}
+            ],
+            "post_checks": [
+                {"name": "check_no_ora_errors", "params": {"log_file": "./logs/output.log"}}
+            ]
+        }
+    ]
+} 

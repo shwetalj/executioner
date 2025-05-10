@@ -76,8 +76,13 @@ class JobExecutioner:
         self.skip_jobs: Set[str] = set()
         self.start_time = None
         self.end_time = None
-        # Job and dependency setup (must be before JobHistoryManager)
-        self.jobs: Dict[str, Dict] = {job["id"]: job for job in self.config["jobs"]}
+        # Validate configuration schema before accessing jobs
+        validate_config(self.config, self.logger)
+        try:
+            self.jobs: Dict[str, Dict] = {job["id"]: job for job in self.config["jobs"]}
+        except KeyError:
+            self.logger.error("Configuration is missing required 'jobs' list.")
+            sys.exit(1)
         if len(self.jobs) != len(self.config["jobs"]):
             print("Duplicate job IDs found in configuration")
             sys.exit(1)
@@ -88,9 +93,6 @@ class JobExecutioner:
         # Now set up the logger with the correct run_id
         self.logger = setup_logging(self.application_name, self.run_id)
         
-        # Validate configuration schema
-        validate_config(self.config, self.logger)
-
         # Email notification settings
         self.email_address = self.config.get("email_address", "")
         self.email_on_success = self.config.get("email_on_success", False)
@@ -686,6 +688,10 @@ class JobExecutioner:
         return order
 
     def run(self, continue_on_error: bool = False, dry_run: bool = False, skip_jobs: list = None, max_iter: int = 1000, resume_run_id: int = None, resume_failed_only: bool = False):
+        # Load dependency plugins at the start of run(), before printing execution banner
+        if self.dependency_plugins:
+            self.logger.info(f"Found {len(self.dependency_plugins)} dependency plugins to load")
+            self.dependency_manager.load_dependency_plugins()
         self.continue_on_error = continue_on_error
         self.dry_run = dry_run
         self.skip_jobs = set(skip_jobs or [])
