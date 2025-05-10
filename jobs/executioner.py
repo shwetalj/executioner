@@ -34,6 +34,7 @@ from jobs.job_runner import JobRunner
 from jobs.logger_factory import setup_logging
 from jobs.job_history_manager import JobHistoryManager
 from jobs.dependency_manager import DependencyManager
+
 from jobs.notification_manager import NotificationManager
 
 class JobExecutioner:
@@ -75,9 +76,17 @@ class JobExecutioner:
         self.skip_jobs: Set[str] = set()
         self.start_time = None
         self.end_time = None
-        
-        # Setup logging (now run_id is available)
-        self.logger = setup_logging(self.application_name, None)
+        # Job and dependency setup (must be before JobHistoryManager)
+        self.jobs: Dict[str, Dict] = {job["id"]: job for job in self.config["jobs"]}
+        if len(self.jobs) != len(self.config["jobs"]):
+            print("Duplicate job IDs found in configuration")
+            sys.exit(1)
+        # Initialize JobHistoryManager (run_id will be set after DB query)
+        self.job_history = JobHistoryManager(self.jobs, self.application_name, None, None)
+        self.run_id = self.job_history.get_new_run_id()
+        self.job_history.run_id = self.run_id
+        # Now set up the logger with the correct run_id
+        self.logger = setup_logging(self.application_name, self.run_id)
         
         # Validate configuration schema
         validate_config(self.config, self.logger)
@@ -150,11 +159,6 @@ class JobExecutioner:
             self.logger.warning("Missing dependencies found. Use --continue-on-error to run anyway.")
 
         self.job_log_paths = {}  # Track job log file paths
-
-        # Initialize JobHistoryManager (run_id will be set after DB query)
-        self.job_history = JobHistoryManager(self.jobs, self.application_name, None, self.logger)
-        self.run_id = self.job_history.get_new_run_id()
-        self.job_history.run_id = self.run_id
 
     def _validate_config(self):
         """Validate configuration against a basic schema."""
@@ -1212,9 +1216,29 @@ class JobExecutioner:
         if self.failed_jobs:
             failed_jobs_str = ", ".join(self.failed_jobs)
             summary += f"\nFailed Jobs: {failed_jobs_str}"
+        # Add detailed failed jobs section
+        failed_jobs_details = ""
+        if self.failed_jobs:
+            failed_jobs_details += "\n\nFailed Jobs (see job log paths below):\n"
+            for job_id in self.failed_jobs:
+                job_log_path = self.job_log_paths.get(job_id, None)
+                desc = self.jobs[job_id].get('description', '')
+                reason = self.failed_job_reasons.get(job_id, '')
+                failed_jobs_details += f"  - {job_id}: {desc}\n      Reason: {reason}"
+                if job_log_path:
+                    failed_jobs_details += f"\n      Log: {job_log_path}"
+                failed_jobs_details += "\n"
+        summary += failed_jobs_details
         # Collect all log files for this run
         log_pattern = os.path.join(Config.LOG_DIR, f"executioner.{self.application_name}.job-*.run-{self.run_id}.log")
         attachments = glob.glob(log_pattern)
+        # Add main application-level run log (fix for actual filename)
+        main_log_path = os.path.join(Config.LOG_DIR, f"executioner.{self.application_name}.run-{self.run_id}.log")
+        if not os.path.exists(main_log_path):
+            # Fallback to run-None.log if run_id log does not exist
+            main_log_path = os.path.join(Config.LOG_DIR, f"executioner.{self.application_name}.run-None.log")
+        if os.path.exists(main_log_path):
+            attachments.append(main_log_path)
         self.notification_manager.send_notification(
             success=success,
             run_id=self.run_id,
