@@ -20,7 +20,18 @@ class NotificationManager:
         self.logger = logger or logging.getLogger("notification_manager")
 
     def send_notification(self, success, run_id, summary, subject_extra=None, attachments=None):
-        if not self.email_address or '@' not in self.email_address:
+        # Debug: log the type and value of email_address
+        #SSJ self.logger.info(f"Type of email_address: {type(self.email_address)}; Value: {self.email_address}")
+        # Normalize email_address to a list of recipients
+        if isinstance(self.email_address, str):
+            recipients = [addr.strip() for addr in self.email_address.split(",") if addr.strip()]
+        elif isinstance(self.email_address, list):
+            recipients = [str(addr).strip() for addr in self.email_address if str(addr).strip()]
+        else:
+            recipients = []
+        if not recipients or not any('@' in addr for addr in recipients):
+            print(f"DEBUG: email_address type: {type(self.email_address)}, value: {self.email_address}")
+            print(f"DEBUG: recipients: {recipients}")
             self.logger.warning(f"Email notifications enabled but email_address is invalid: '{self.email_address}'.")
             return
         if (success and not self.email_on_success) or (not success and not self.email_on_failure):
@@ -30,8 +41,8 @@ class NotificationManager:
         if subject_extra:
             subject += f" - {subject_extra}"
         message = MIMEMultipart()
-        message["From"] = self.smtp_user or self.email_address
-        message["To"] = self.email_address
+        message["From"] = self.smtp_user or (recipients[0] if recipients else "")
+        message["To"] = ", ".join(recipients)
         message["Subject"] = subject
         message.attach(MIMEText(summary, "plain"))
         # Attach files if provided
@@ -55,7 +66,7 @@ class NotificationManager:
                 server.starttls(context=context)
                 if self.smtp_user and self.smtp_password:
                     server.login(self.smtp_user, self.smtp_password)
-                server.sendmail(message["From"], self.email_address, message.as_string())
-            self.logger.info(f"Notification email sent to {self.email_address} for run {run_id}.")
+                server.sendmail(message["From"], recipients, message.as_string())
+            self.logger.info(f"Notification email sent to {recipients} for run {run_id}.")
         except Exception as e:
             self.logger.error(f"Failed to send notification email: {e}") 

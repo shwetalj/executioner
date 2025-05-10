@@ -784,7 +784,7 @@ class JobExecutioner:
             if not_completed:
                 self.logger.warning(f"The following jobs were not completed: {', '.join(not_completed)}")
                 self.exit_code = 1
-            if self.email_address and '@' in self.email_address:
+            if self._has_valid_email():
                 if len(self.failed_jobs) > 0 and self.email_on_failure:
                     self._send_notification(success=False)
                 elif len(self.failed_jobs) == 0 and self.email_on_success:
@@ -1245,5 +1245,12 @@ class JobExecutioner:
             summary=summary,
             attachments=attachments
         )
+
+    def _has_valid_email(self):
+        if isinstance(self.email_address, str):
+            return '@' in self.email_address
+        elif isinstance(self.email_address, list):
+            return any('@' in str(addr) for addr in self.email_address)
+        return False
 
 # ... existing code ... 
