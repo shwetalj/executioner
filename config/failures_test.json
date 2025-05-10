@@ -1,9 +1,13 @@
 {
     "application_name": "failures_test",
     "default_timeout": 2,
-    "email_address": "test@example.com",
-    "email_on_success": false,
-    "email_on_failure": false,
+    "email_on_success": true,
+    "email_on_failure": true,
+    "email_address": "shwetal.joshi@gmail.com",
+    "smtp_server": "smtp.gmail.com",
+    "smtp_port": 587,
+    "smtp_user": "shwetal.s.joshi@gmail.com",
+    "smtp_password": "kpkd tnun oati mgqh",
     "env_variables": {
         "APP_ENV": "test",
         "LOG_LEVEL": "debug"

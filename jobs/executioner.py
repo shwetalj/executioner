@@ -781,9 +781,9 @@ class JobExecutioner:
                 self.logger.warning(f"The following jobs were not completed: {', '.join(not_completed)}")
                 self.exit_code = 1
             if self.email_address and '@' in self.email_address:
-                if self.exit_code != 0 and self.email_on_failure:
+                if len(self.failed_jobs) > 0 and self.email_on_failure:
                     self._send_notification(success=False)
-                elif self.exit_code == 0 and self.email_on_success:
+                elif len(self.failed_jobs) == 0 and self.email_on_success:
                     self._send_notification(success=True)
             elif self.email_on_failure or self.email_on_success:
                 self.logger.warning(f"Email notifications enabled but email_address is invalid: '{self.email_address}'.")
