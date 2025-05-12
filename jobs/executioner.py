@@ -176,27 +176,6 @@ class JobExecutioner:
                 self.logger.error(f"Job '{job['id']}' has invalid dependencies")
                 sys.exit(1)
 
-    def _get_previous_run_status(self, resume_run_id: int) -> Dict[str, str]:
-        job_statuses = {}
-        try:
-            with db_connection(self.logger) as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT id, status FROM job_history WHERE run_id = ?", (resume_run_id,))
-                job_statuses = {row[0]: row[1] for row in cursor.fetchall()}
-            current_jobs = set(self.jobs.keys())
-            previous_jobs = set(job_statuses.keys())
-            if current_jobs != previous_jobs:
-                added_jobs = current_jobs - previous_jobs
-                if added_jobs:
-                    self.logger.warning(f"New jobs not in previous run: {', '.join(added_jobs)}")
-                removed_jobs = previous_jobs - current_jobs
-                if removed_jobs:
-                    self.logger.warning(f"Jobs from previous run not in current config: {', '.join(removed_jobs)}")
-            return job_statuses
-        except sqlite3.Error as e:
-            self.logger.error(f"Database error while getting previous run status: {e}")
-            return {}
-
     def _setup_job_logger(self, job_id: str) -> Tuple[logging.Logger, logging.FileHandler, str]:
         job_log_path = os.path.join(Config.LOG_DIR, f"executioner.{self.application_name}.job-{job_id}.run-{self.run_id}.log")
         job_logger, job_file_handler = setup_job_logger(self.application_name, self.run_id, job_id, job_log_path)
@@ -397,9 +376,10 @@ class JobExecutioner:
         return result, fail_reason
 
     def _run_dry(self, resume_run_id=None, resume_failed_only=False):
+        self.start_time = datetime.datetime.now()
         self.logger.info(f"Starting dry run - printing execution plan")
         if resume_run_id:
-            previous_job_statuses = self._get_previous_run_status(resume_run_id)
+            previous_job_statuses = self.job_history.get_previous_run_status(resume_run_id)
             if not previous_job_statuses:
                 self.logger.error(f"No job history found for run ID {resume_run_id}. Showing full plan.")
             else:

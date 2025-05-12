@@ -1,0 +1,42 @@
+Code and Functionality Duplication Findings
+=========================================
+
+1. Duplicate Implementations: validate_env_vars
+------------------------------------------------
+- jobs/env_manager.py and jobs/env_utils.py both define a function called validate_env_vars.
+  - In env_manager.py, it is a placeholder and simply returns True.
+  - In env_utils.py, it is also a placeholder and returns True.
+  - env_manager.py imports validate_env_vars from env_utils.py, but then redefines it, which is redundant and can cause confusion or bugs if the two implementations diverge.
+- Recommendation: Remove the duplicate in env_manager.py and use only the one in env_utils.py.
+
+2. Duplicate Implementations: get_previous_run_status and JobHistoryManager
+----------------------------------------------------------------------------
+- db/history.py and jobs/job_history_manager.py both define a class called JobHistoryManager with a method get_previous_run_status.
+  - In db/history.py, the class and method are stubs/placeholders.
+  - In jobs/job_history_manager.py, the class is fully implemented and used in the main codebase.
+- jobs/executioner.py also has a method _get_previous_run_status that duplicates the logic of get_previous_run_status in JobHistoryManager.
+- Recommendation:
+  - Remove or refactor the stub in db/history.py if it is not used.
+  - Refactor jobs/executioner.py to use the JobHistoryManager.get_previous_run_status method directly, rather than duplicating the logic.
+
+3. Job Execution Logic: run Methods
+------------------------------------
+- jobs/job_runner.py and jobs/executioner.py both have a run method that handles job execution, retries, and logging.
+  - Both methods implement similar retry logic, timeout handling, and job status updates.
+  - There is a risk of these implementations diverging, leading to inconsistent behavior.
+- Recommendation: Consider consolidating job execution logic into a single class or utility, or ensure that one is a thin wrapper around the other to avoid code drift.
+
+4. General Observations
+------------------------
+- There are several utility functions (e.g., for environment variable handling, job status, and database access) that are defined in multiple places or imported and then redefined.
+- There are placeholder or stub files/classes (e.g., in db/history.py) that may be legacy or unused.
+
+Summary Table
+=============
+
+| Function/Class                | Files/Locations                                      | Duplication/Issue                | Recommendation                        |
+|-------------------------------|-----------------------------------------------------|-----------------------------------|---------------------------------------|
+| validate_env_vars             | env_manager.py, env_utils.py                        | Redundant placeholder             | Remove duplicate, use one source      |
+| JobHistoryManager             | db/history.py, job_history_manager.py               | Stub vs. real implementation      | Remove/refactor stub                  |
+| get_previous_run_status       | db/history.py, job_history_manager.py, executioner.py | Logic duplicated                  | Use single implementation             |
+| Job execution run methods     | job_runner.py, executioner.py                       | Similar logic in both             | Consolidate or refactor               |
