@@ -31,7 +31,7 @@ from db.sqlite_backend import db_connection
 from config.validator import validate_config
 from jobs.checks import CHECK_REGISTRY  # Ensure visibility in all contexts
 from jobs.job_runner import JobRunner
-from jobs.logger_factory import setup_logging
+from jobs.logger_factory import setup_logging, setup_job_logger
 from jobs.job_history_manager import JobHistoryManager
 from jobs.dependency_manager import DependencyManager
 
@@ -40,23 +40,12 @@ from jobs.command_utils import validate_command, parse_command
 
 class JobExecutioner:
     def __init__(self, config_file: str):
-        # Will be set up properly in _setup_logging
-        self.logger = None
-
-        # Set up a basic logger first to handle early errors
+        # Set up a minimal logger for early errors
         self.logger = logging.getLogger('executioner')
-        
-        # Clear any existing handlers (prevents duplication)
-        for handler in self.logger.handlers[:]:
-            
-            self.logger.removeHandler(handler)
-            
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-        self.logger.addHandler(console_handler)
+        self.logger.handlers.clear()
+        self.logger.addHandler(logging.StreamHandler(sys.stdout))
         self.logger.setLevel(logging.INFO)
-        self.logger.propagate = False  # Don't propagate to root logger
-        
+        self.logger.propagate = False
         # Load and validate configuration
         try:
             with open(str(config_file), "r") as file:
@@ -67,7 +56,6 @@ class JobExecutioner:
         except json.JSONDecodeError as e:
             self.logger.error(f"Configuration file '{config_file}' contains invalid JSON: {e}")
             sys.exit(1)
-
         # Initialize necessary attributes for logging setup
         self.application_name = self.config.get("application_name",
             os.path.splitext(os.path.basename(config_file))[0])
@@ -212,14 +200,7 @@ class JobExecutioner:
 
     def _setup_job_logger(self, job_id: str) -> Tuple[logging.Logger, logging.FileHandler, str]:
         job_log_path = os.path.join(Config.LOG_DIR, f"executioner.{self.application_name}.job-{job_id}.run-{self.run_id}.log")
-        job_logger = logging.getLogger(f'job_{job_id}')
-        job_logger.propagate = False
-        for handler in job_logger.handlers[:]:
-            job_logger.removeHandler(handler)
-        job_file_handler = logging.FileHandler(job_log_path)
-        job_file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-        job_logger.addHandler(job_file_handler)
-        job_logger.setLevel(logging.DEBUG)
+        job_logger, job_file_handler = setup_job_logger(self.application_name, self.run_id, job_id, job_log_path)
         job_description = self.jobs[job_id].get('description', '')
         job_command = self.jobs[job_id]['command']
         job_logger.info(f"Executing job - {job_id}: {job_command}")

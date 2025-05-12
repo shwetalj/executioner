@@ -52,3 +52,17 @@ def setup_logging(application_name, run_id):
     logger.setLevel(logging.INFO)
     logger.propagate = False
     return logger 
+
+def setup_job_logger(application_name, run_id, job_id, job_log_path):
+    """
+    Set up and return a logger for an individual job.
+    """
+    job_logger = logging.getLogger(f'job_{job_id}')
+    job_logger.propagate = False
+    for handler in job_logger.handlers[:]:
+        job_logger.removeHandler(handler)
+    job_file_handler = logging.FileHandler(job_log_path)
+    job_file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    job_logger.addHandler(job_file_handler)
+    job_logger.setLevel(logging.DEBUG)
+    return job_logger, job_file_handler 
