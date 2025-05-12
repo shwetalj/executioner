@@ -31,9 +31,11 @@ class JobHistoryManager:
             current_jobs = set(self.jobs.keys())
             previous_jobs = set(job_statuses.keys())
             if current_jobs != previous_jobs:
-                if added_jobs := current_jobs - previous_jobs:
+                added_jobs = current_jobs - previous_jobs
+                if added_jobs:
                     self.logger.warning(f"New jobs not in previous run: {', '.join(added_jobs)}")
-                if removed_jobs := previous_jobs - current_jobs:
+                removed_jobs = previous_jobs - current_jobs
+                if removed_jobs:
                     self.logger.warning(f"Jobs from previous run not in current config: {', '.join(removed_jobs)}")
             return job_statuses
         except sqlite3.Error as e:
