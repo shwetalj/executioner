@@ -179,7 +179,7 @@ class JobExecutioner:
     def _get_previous_run_status(self, resume_run_id: int) -> Dict[str, str]:
         job_statuses = {}
         try:
-            with db_connection() as conn:
+            with db_connection(self.logger) as conn:
                 cursor = conn.cursor()
                 cursor.execute("SELECT id, status FROM job_history WHERE run_id = ?", (resume_run_id,))
                 job_statuses = {row[0]: row[1] for row in cursor.fetchall()}
