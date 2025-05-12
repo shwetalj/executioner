@@ -37,6 +37,7 @@ from jobs.dependency_manager import DependencyManager
 
 from jobs.notification_manager import NotificationManager
 from jobs.command_utils import validate_command, parse_command
+from jobs.env_manager import merge_env_vars
 
 class JobExecutioner:
     def __init__(self, config_file: str):
@@ -239,20 +240,17 @@ class JobExecutioner:
                 warning = f"Command has potentially unsafe patterns but will be executed: {command}"
                 job_logger.warning(warning)
                 print(f"{Config.COLOR_YELLOW}{warning}{Config.COLOR_RESET}")
-            modified_env = os.environ.copy()
-            app_env_vars = {k: str(v) for k, v in self.app_env_variables.items()}
-            modified_env.update(app_env_vars)
             job = self.jobs[job_id]
-            job_env_vars = job.get("env_variables", {})
-            job_string_env_vars = {k: str(v) for k, v in job_env_vars.items()}
-            modified_env.update(job_string_env_vars)
+            merged_env = merge_env_vars(self.app_env_variables, job.get("env_variables", {}))
+            modified_env = os.environ.copy()
+            modified_env.update(merged_env)
             env_var_sources = []
-            if app_env_vars:
+            if self.app_env_variables:
                 env_var_sources.append("application")
-            if job_env_vars:
+            if job.get("env_variables"):
                 env_var_sources.append(f"job '{job_id}'")
             if env_var_sources:
-                all_env_keys = sorted(set(app_env_vars.keys()) | set(job_env_vars.keys()))
+                all_env_keys = sorted(set(self.app_env_variables.keys()) | set(job.get("env_variables", {}).keys()))
                 job_logger.info(f"Using environment variables from {' and '.join(env_var_sources)}: {all_env_keys}")
             parsed_command = parse_command(command, job_logger)
             if parsed_command and not parsed_command.get('needs_shell', True):
