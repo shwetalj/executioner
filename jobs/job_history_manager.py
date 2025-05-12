@@ -2,6 +2,7 @@ import sqlite3
 import json
 from db.sqlite_backend import db_connection
 from jobs.db_utils import handle_db_errors
+from jobs.json_utils import to_json
 
 class JobHistoryManager:
     def __init__(self, jobs, application_name, run_id, logger):
@@ -68,7 +69,7 @@ class JobHistoryManager:
     @handle_db_errors(lambda self: self.logger)
     def update_retry_history(self, job_id, retry_history, retry_count, status, reason=None):
         with db_connection(self.logger) as conn:
-            retry_history_json = json.dumps(retry_history)
+            retry_history_json = to_json(retry_history)
             cursor = conn.cursor()
             cursor.execute("PRAGMA table_info(job_history)")
             columns = [col[1] for col in cursor.fetchall()]

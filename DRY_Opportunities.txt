@@ -11,35 +11,35 @@ Direct use of sqlite3.connect and similar database access patterns are present i
 Repeated logic for updating job status, retry history, and handling job execution results in job_history_manager.py, job_runner.py, and related files.
 * DRY Solution: Abstract common job status and retry logic into shared methods or a mixin/base class.
 
-5. Time Period and Date Handling
--------------------------------
-In timeperiod.py, functions for handling years, months, weeks, days, hours, minutes, and seconds share similar logic for range checking, normalization, and error handling.
-* DRY Solution: Refactor repeated range-splitting, normalization, and validation logic into shared helper functions. Consider using decorators or higher-order functions for repeated validation patterns.
-
-6. Error and Exception Handling
+5. Error and Exception Handling
 ------------------------------
 Many modules repeat similar try/except blocks for error handling, especially for database and config validation.
 * DRY Solution: Use decorators or context managers for common error handling patterns, especially for database and config operations.
 
-7. JSON Serialization
+6. JSON Serialization
 ---------------------
 Repeated uses of json.dumps and json.dump for serializing retry history and other data.
 * DRY Solution: If you have custom serialization logic, centralize it in a utility function or class.
 
-8. Config Validation
+7. Config Validation
 --------------------
 Validation of job and config fields (e.g., checking for required keys, types) is repeated in several places.
 * DRY Solution: Use a schema validation library (like pydantic or cerberus) or create a shared validation utility.
 
-9. Magic Values and Constants
+8. Magic Values and Constants
 ----------------------------
 Constants like database file names, color codes, and status strings are scattered.
 * DRY Solution: Centralize all constants in a single module (e.g., constants.py) and import where needed.
 
-10. Class Initialization Patterns
+9. Class Initialization Patterns
 --------------------------------
 Many classes take similar arguments (e.g., logger, config, job_id, etc.) and set them as attributes.
 * DRY Solution: Use a base class or a mixin for shared initialization logic.
+
+10. Time Period and Date Handling
+---------------------------------
+In timeperiod.py, functions for handling years, months, weeks, days, hours, minutes, and seconds share similar logic for range checking, normalization, and error handling.
+* DRY Solution: Refactor repeated range-splitting, normalization, and validation logic into shared helper functions. Consider using decorators or higher-order functions for repeated validation patterns.
 
 
 Summary Table of Key DRY Opportunities
@@ -49,9 +49,9 @@ Summary Table of Key DRY Opportunities
 |---------------------------|---------------------------------------|---------------------------------|
 | DB connection/query       | db/sqlite_backend.py, job_history...  | DB helper/context manager       |
 | Job status/retry logic    | job_history_manager.py, job_runner.py | Shared methods/mixin            |
-| Time period/date handling | timeperiod.py                         | Shared helpers, higher-order fn |
 | Error/exception handling  | db, config, jobs                      | Decorators/context managers     |
 | JSON serialization        | job_history_manager.py, ...           | Shared serialization utility    |
 | Config validation         | config/validator.py, jobs             | Schema validation/shared utils  |
 | Magic values/constants    | All                                   | Central constants module        |
-| Class init patterns       | jobs, db, ...                         | Base class/mixin                | 
+| Class init patterns       | jobs, db, ...                         | Base class/mixin                |
+| Time period/date handling | timeperiod.py                         | Shared helpers, higher-order fn | 
