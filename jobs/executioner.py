@@ -392,6 +392,7 @@ class JobExecutioner:
             get_last_exit_code=self.job_history.get_last_exit_code,
             setup_job_logger=self._setup_job_logger
         )
+        runner.job_history = self.job_history
         result, fail_reason = runner.run(dry_run=self.dry_run, continue_on_error=self.continue_on_error, return_reason=True)
         return result, fail_reason
 

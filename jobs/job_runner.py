@@ -7,8 +7,9 @@ from queue import Queue, Empty
 from typing import Dict, Any, Tuple
 from jobs.checks import CHECK_REGISTRY
 from jobs.check_executor import run_checks
+from jobs.job_status_mixin import JobStatusMixin
 
-class JobRunner:
+class JobRunner(JobStatusMixin):
     def __init__(self, job_id: str, job_config: dict, global_env: dict, main_logger, config: dict, run_id: int, app_name: str, db_connection, validate_timeout, update_job_status, update_retry_history, get_last_exit_code, setup_job_logger):
         self.job_id = job_id
         self.job = job_config
@@ -19,8 +20,8 @@ class JobRunner:
         self.app_name = app_name
         self.db_connection = db_connection
         self.validate_timeout = validate_timeout
-        self.update_job_status = update_job_status
-        self.update_retry_history = update_retry_history
+        self.job_history = None  # Will be set externally
+        self.logger = main_logger  # Use main_logger for mixin
         self.get_last_exit_code = get_last_exit_code
         self.setup_job_logger = setup_job_logger
 
@@ -66,7 +67,7 @@ class JobRunner:
                 return True
             if not command.strip():
                 self.main_logger.info(f"Job {self.job_id}: SUCCESS (empty command)")
-                self.update_job_status(self.job_id, "SUCCESS")
+                self.mark_success(self.job_id)
                 if return_reason:
                     return True, None
                 return True
@@ -75,7 +76,7 @@ class JobRunner:
             if pre_checks:
                 if not run_checks(pre_checks, job_logger, phase="pre", job_id=self.job_id):
                     self.main_logger.error(f"Pre-checks failed for job {self.job_id}. Skipping job execution.")
-                    self.update_job_status(self.job_id, "PRECHECK_FAILED")
+                    self.mark_failed(self.job_id, "PRECHECK_FAILED")
                     fail_reason = f"Pre-check failed"
                     if return_reason:
                         return False, fail_reason
@@ -122,7 +123,7 @@ class JobRunner:
                             return False
                     msg = f"Job '{self.job_id}' completed successfully in {duration:.2f} seconds"
                     self.main_logger.info(msg)
-                    self.update_job_status(self.job_id, "SUCCESS")
+                    self.mark_success(self.job_id)
                     if return_reason:
                         return True, None
                     return True
@@ -216,21 +217,21 @@ class JobRunner:
                     job_logger.error(f"Error terminating process on timeout: {e}")
                 stop_reading.set()
                 reader_thread.join(timeout=2)
-                self.update_job_status(self.job_id, "TIMEOUT")
+                self.mark_failed(self.job_id, "TIMEOUT")
                 return "TIMEOUT"
             stop_reading.set()
             reader_thread.join(timeout=2)
             if exit_code == 0:
                 job_logger.info(f"Job {self.job_id}: SUCCESS")
-                self.update_job_status(self.job_id, "SUCCESS")
+                self.mark_success(self.job_id)
                 return "SUCCESS"
             else:
                 job_logger.error(f"Job {self.job_id}: FAILED with exit code {exit_code}")
-                self.update_job_status(self.job_id, "FAILED")
+                self.mark_failed(self.job_id, "FAILED")
                 return "FAILED"
         except Exception as e:
             job_logger.error(f"Exception during command execution: {e}")
-            self.update_job_status(self.job_id, "ERROR")
+            self.mark_failed(self.job_id, "ERROR")
             return "ERROR"
         finally:
             if process and process.stdout:
