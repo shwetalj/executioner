@@ -91,6 +91,12 @@ def substitute_env_vars_in_obj(obj, env_vars):
 SAMPLE_CONFIG = """{
     "application_name": "data_pipeline",
     "default_timeout": 10800,
+    "default_max_retries": 2,
+    "default_retry_delay": 30,
+    "default_retry_backoff": 1.5,
+    "default_retry_jitter": 0.1,
+    "default_max_retry_time": 1800,
+    "default_retry_on_exit_codes": [1],
     "email_address": "alerts@example.com",
     "email_on_success": true,
     "email_on_failure": true,
@@ -121,7 +127,14 @@ SAMPLE_CONFIG = """{
             ],
             "post_checks": [
                 {"name": "check_no_ora_errors", "params": {"log_file": "./logs/output.log"}}
-            ]
+            ],
+            "max_retries": 2,
+            "retry_delay": 20,
+            "retry_backoff": 2.0,
+            "retry_jitter": 0.2,
+            "max_retry_time": 600,
+            "retry_on_status": ["ERROR", "FAILED", "TIMEOUT"],
+            "retry_on_exit_codes": [1, 2]
         },
         {
             "id": "clean_data",
