@@ -101,4 +101,23 @@ class DependencyManager:
         for job_id in self.jobs:
             if job_id not in visited:
                 visit(job_id)
-        return order 
+        return order
+
+    def get_job_dependencies(self, job_id):
+        """Return the dependencies for a given job_id as a set."""
+        return set(self.dependencies.get(job_id, set()))
+
+    def get_all_dependencies(self):
+        """Return a dict of all job_ids to their dependencies."""
+        return {job_id: set(deps) for job_id, deps in self.dependencies.items()}
+
+    def report_missing_dependencies(self, logger=None):
+        """Log missing dependencies for all jobs and return True if any are missing."""
+        logger = logger or self.logger
+        missing = self.check_missing_dependencies()
+        if missing:
+            for job_id, deps in missing.items():
+                logger.warning(f"Job {job_id} references dependencies that don't exist: {', '.join(deps)}")
+            logger.warning("Missing dependencies found. Use --continue-on-error to run anyway.")
+            return True
+        return False 

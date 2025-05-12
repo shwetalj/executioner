@@ -123,7 +123,6 @@ class JobExecutioner:
             self.logger.error("Duplicate job IDs found in configuration")
             sys.exit(1)
         self.dependency_manager = DependencyManager(self.jobs, self.logger, self.config.get("dependency_plugins", []))
-        self.dependencies = self.dependency_manager.dependencies
 
         # Threading primitives
         self.lock = threading.RLock()
@@ -143,12 +142,8 @@ class JobExecutioner:
             self.logger.error("Circular dependencies detected in job configuration")
             print(f"{Config.COLOR_RED}ERROR: Circular dependencies detected{Config.COLOR_RESET}")
             sys.exit(1)
-
-        missing_deps = self.dependency_manager.check_missing_dependencies()
-        if missing_deps:
-            for job_id, missing in missing_deps.items():
-                self.logger.warning(f"Job {job_id} references dependencies that don't exist: {', '.join(missing)}")
-            self.logger.warning("Missing dependencies found. Use --continue-on-error to run anyway.")
+        if self.dependency_manager.report_missing_dependencies(self.logger):
+            sys.exit(1)
 
         self.job_log_paths = {}  # Track job log file paths
 
@@ -447,7 +442,7 @@ class JobExecutioner:
             job = self.jobs[job_id]
             job_desc = job.get("description", "")
             env_vars_info = f" {Config.COLOR_MAGENTA}[ENV: {', '.join(job['env_variables'].keys())}]{Config.COLOR_RESET}" if job.get("env_variables") else ""
-            deps_info = f" {Config.COLOR_CYAN}[DEPS: {', '.join(self.dependencies.get(job_id, [])) or 'none'}]{Config.COLOR_RESET}"
+            deps_info = f" {Config.COLOR_CYAN}[DEPS: {', '.join(self.dependency_manager.get_job_dependencies(job_id)) or 'none'}]{Config.COLOR_RESET}"
             if job_id in self.skip_jobs:
                 print(f"{i+1}. {Config.COLOR_YELLOW}{job_id}{Config.COLOR_RESET} - {job_desc} {Config.COLOR_YELLOW}[SKIPPED]{Config.COLOR_RESET}{env_vars_info}{deps_info}")
             else:
@@ -485,7 +480,7 @@ class JobExecutioner:
             if node in temp_visited or node in visited:
                 return
             temp_visited.add(node)
-            for dep in self.dependencies.get(node, []):
+            for dep in self.dependency_manager.get_job_dependencies(node):
                 if dep in self.jobs:
                     visit(dep)
             temp_visited.remove(node)
@@ -556,7 +551,7 @@ class JobExecutioner:
                         self.completed_jobs.add(job_id)
                         self.logger.info(f"Skipping job with status {status}: {job_id}")
         with self.lock:
-            for job_id, deps in self.dependencies.items():
+            for job_id, deps in self.dependency_manager.get_all_dependencies().items():
                 if job_id in self.skip_jobs:
                     continue
                 all_deps_satisfied = all(dep in self.completed_jobs or dep in self.skip_jobs for dep in deps)
@@ -673,7 +668,7 @@ class JobExecutioner:
                 break
             if job_id in self.skip_jobs or job_id in self.completed_jobs:
                 continue
-            deps = self.dependencies[job_id]
+            deps = self.dependency_manager.get_job_dependencies(job_id)
             missing_deps = [dep for dep in deps if dep not in self.completed_jobs and dep not in self.skip_jobs]
             if missing_deps:
                 if all(dep in self.jobs for dep in missing_deps):
@@ -768,7 +763,7 @@ class JobExecutioner:
                         job_id in self.completed_jobs or
                         job_id in self.active_jobs):
                         continue
-                    deps = self.dependencies.get(job_id, set())
+                    deps = self.dependency_manager.get_job_dependencies(job_id)
                     missing_deps = [dep for dep in deps if dep not in self.completed_jobs and dep not in self.skip_jobs]
                     if not missing_deps:
                         should_submit = True
@@ -856,7 +851,7 @@ class JobExecutioner:
                 if current_job in visited:
                     continue
                 visited.add(current_job)
-                for job_id, deps in self.dependencies.items():
+                for job_id, deps in self.dependency_manager.get_all_dependencies().items():
                     if current_job in deps and job_id not in visited:
                         if job_id not in self.completed_jobs and job_id not in self.skip_jobs:
                             self.logger.debug(f"Marking job {job_id} as failed due to dependency on {current_job}")
@@ -875,7 +870,7 @@ class JobExecutioner:
             active_jobs_snapshot = self.active_jobs.copy()
             queued_jobs_snapshot = self.queued_jobs.copy()
             jobs_to_queue = []
-            for job_id, deps in self.dependencies.items():
+            for job_id, deps in self.dependency_manager.get_all_dependencies().items():
                 if completed_job_id not in deps:
                     continue
                 if (job_id in completed_jobs_snapshot or
