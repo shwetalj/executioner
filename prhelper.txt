@@ -1,0 +1,55 @@
+--------- * Start of Release 96.0 in UIIS03 * ----------
+
+Current year: 2025
+Source Release dir: /PRs/gitlab/uii-releases/builds/Release Notes 2025
+Source PR Directory: /PRs/gitlab/uii-releases/DB_PRs/mod96.0
+Work Directory: /dba_work_area/PRs/96.0
+Log Directory: /dba_work_area/PRs/96.0/logs/uiis03
+
+ **** DISABLE TRIGGERS with edtriggers disable
+
+Before Release:
+
+sqlplus /nolog @PR_104699.sql $(authlookup -u uii0@uiis03 -p) # Run as uii0
+sqlplus /nolog @PR_104719.sql $(authlookup -u uii0@uiis03 -p) # Run as uii0
+sqlplus /nolog @PR_104739.sql $(authlookup -u uii0@uiis03 -p) # Run as uii0
+sqlplus /nolog @PR_104740.sql $(authlookup -u uii0@uiis03 -p) # Run as uii0
+sqlplus /nolog @PR_104681.sql $(authlookup -u uii0@uiis03 -p) # Run as uii0
+sqlplus /nolog @PR_104682.sql $(authlookup -u uii0@uiis03 -p) # Run as uii0
+sqlplus /nolog @PR_104180.sql $(authlookup -u uii0@uiis03 -p) # Run as uii0
+sqlplus /nolog @PR_104181.sql $(authlookup -u uii0@uiis03 -p) # Run as uii0
+sqlplus /nolog @PR_104221.sql $(authlookup -u uii0@uiis03 -p) # Run as uii0
+sqlplus /nolog @PR_104459.sql $(authlookup -u uii0@uiis03 -p) # Run as UII0
+sqlplus /nolog @PR_104460.sql $(authlookup -u uii0@uiis03 -p) # Run as UII0
+sqlplus /nolog @PR_104780.sql $(authlookup -u uii0@uiis03 -p) # Run as uii0
+sqlplus /nolog @PR_104781.sql $(authlookup -u uii0@uiis03 -p) # Run as uii0
+
+After BO Commit:[BO Commit is the process of shutting down feed automation,swapping uiiback symlinks, loading metadata, and loading traunches]
+
+
+After FO Commit:[FO Commit is the process of swapping uiiapp/uiimail symlinks,restarting all java processes, transferring then pre-loading all SR2 assets, and swapping uiiweb symlinks]
+
+***** CRITICAL: Following Indexes need to be created to support the foreign keys.
+***** CRITICAL: DO NOT PROCEED WTIH APPLYING THE PRs UNTIL ALL THE MISSING INDEXES ARE ACCOUNTED FOR.
+
+PR_104719.sql: CREATE INDEX idx_TU_ACCT_ENROLL_PLATFORM_CODE_ID ON TU_ACCT (ENROLL_PLATFORM_CODE_ID) &online_flag;
+
+
+run -u acsdba@uiis03 indexnoparallel # sqlplus PR_
+run -u acsdba@uiis03 tablenoparallel # sqlplus PR_
+
+
+
+--------- * End of Release 96.0 in UIIS03 * ----------
+
+
+
+ **** ENABLE TRIGGERS with edtriggers enable
+
+
+
+
+----- ASTRO ------
+
+
+
