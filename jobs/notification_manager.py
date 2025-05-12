@@ -4,7 +4,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
-import logging
+from jobs.logger_factory import setup_logging
 import os
 
 class NotificationManager:
@@ -17,7 +17,7 @@ class NotificationManager:
         self.smtp_user = smtp_user
         self.smtp_password = smtp_password
         self.application_name = application_name
-        self.logger = logger or logging.getLogger("notification_manager")
+        self.logger = logger or setup_logging(application_name, "main")
 
     def send_notification(self, success, run_id, summary, subject_extra=None, attachments=None):
         # Debug: log the type and value of email_address

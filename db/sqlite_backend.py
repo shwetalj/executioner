@@ -5,11 +5,13 @@ import os
 import json
 from contextlib import contextmanager
 from config.loader import Config
+from jobs.logger_factory import setup_logging
 
-logger = logging.getLogger('executioner')
+def get_logger(application_name="executioner", run_id=None):
+    return setup_logging(application_name, run_id or "main")
 
 @contextmanager
-def db_connection():
+def db_connection(logger):
     """Context manager for database connections to ensure proper cleanup."""
     conn = None
     try:
@@ -27,17 +29,18 @@ def db_connection():
             except Exception as e:
                 logger.error(f"Error closing database connection: {e}")
 
-def init_db(verbose=False):
+def init_db(verbose=False, logger=None):
     """Initialize the SQLite database with enhanced schema versioning and migration support."""
     import hashlib  # Import for creating migration hashes
     db_dir = os.path.dirname(os.path.abspath(Config.DB_FILE))
     os.makedirs(db_dir, exist_ok=True)
     log_level = logging.INFO if verbose else logging.DEBUG
+    logger = logger or get_logger()
     logger.log(log_level, f"Initializing database at {Config.DB_FILE}")
     db_exists = os.path.exists(Config.DB_FILE)
     if db_exists:
         try:
-            with db_connection() as conn:
+            with db_connection(logger) as conn:
                 cursor = conn.cursor()
                 cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='schema_version'")
                 if cursor.fetchone():
@@ -49,7 +52,7 @@ def init_db(verbose=False):
         except sqlite3.Error:
             pass
     try:
-        with db_connection() as conn:
+        with db_connection(logger) as conn:
             cursor = conn.cursor()
             cursor.execute("PRAGMA busy_timeout = 5000")
             cursor.execute("PRAGMA foreign_keys = ON")

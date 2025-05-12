@@ -42,20 +42,20 @@ from jobs.env_manager import merge_env_vars
 class JobExecutioner:
     def __init__(self, config_file: str):
         # Set up a minimal logger for early errors
-        self.logger = logging.getLogger('executioner')
-        self.logger.handlers.clear()
-        self.logger.addHandler(logging.StreamHandler(sys.stdout))
-        self.logger.setLevel(logging.INFO)
-        self.logger.propagate = False
+        # self.logger = logging.getLogger('executioner')
+        # self.logger.handlers.clear()
+        # self.logger.addHandler(logging.StreamHandler(sys.stdout))
+        # self.logger.setLevel(logging.INFO)
+        # self.logger.propagate = False
         # Load and validate configuration
         try:
             with open(str(config_file), "r") as file:
                 self.config = json.load(file)
         except FileNotFoundError:
-            self.logger.error(f"Configuration file '{config_file}' not found.")
+            print(f"Configuration file '{config_file}' not found.")
             sys.exit(1)
         except json.JSONDecodeError as e:
-            self.logger.error(f"Configuration file '{config_file}' contains invalid JSON: {e}")
+            print(f"Configuration file '{config_file}' contains invalid JSON: {e}")
             sys.exit(1)
         # Initialize necessary attributes for logging setup
         self.application_name = self.config.get("application_name",
@@ -67,21 +67,24 @@ class JobExecutioner:
         self.start_time = None
         self.end_time = None
         # Validate configuration schema before accessing jobs
-        validate_config(self.config, self.logger)
+        # Use a temporary logger for validation errors
+        temp_logger = setup_logging(self.application_name, "main")
+        validate_config(self.config, temp_logger)
         try:
             self.jobs: Dict[str, Dict] = {job["id"]: job for job in self.config["jobs"]}
         except KeyError:
-            self.logger.error("Configuration is missing required 'jobs' list.")
+            temp_logger.error("Configuration is missing required 'jobs' list.")
             sys.exit(1)
         if len(self.jobs) != len(self.config["jobs"]):
             print("Duplicate job IDs found in configuration")
             sys.exit(1)
         # Initialize JobHistoryManager (run_id will be set after DB query)
-        self.job_history = JobHistoryManager(self.jobs, self.application_name, None, None)
+        self.job_history = JobHistoryManager(self.jobs, self.application_name, None, temp_logger)
         self.run_id = self.job_history.get_new_run_id()
         self.job_history.run_id = self.run_id
-        # Now set up the logger with the correct run_id
+        # Now set up the logger with the correct run_id and update JobHistoryManager
         self.logger = setup_logging(self.application_name, self.run_id)
+        self.job_history.set_logger(self.logger)
         
         # Email notification settings
         self.email_address = self.config.get("email_address", "")

@@ -10,9 +10,12 @@ class JobHistoryManager:
         self.logger = logger
         self.job_status_batch = []
 
+    def set_logger(self, logger):
+        self.logger = logger
+
     def get_new_run_id(self):
         try:
-            with db_connection() as conn:
+            with db_connection(self.logger) as conn:
                 cursor = conn.cursor()
                 cursor.execute("SELECT MAX(CAST(run_id AS INTEGER)) FROM job_history")
                 last_run_id = cursor.fetchone()[0]
@@ -24,7 +27,7 @@ class JobHistoryManager:
     def get_previous_run_status(self, resume_run_id):
         job_statuses = {}
         try:
-            with db_connection() as conn:
+            with db_connection(self.logger) as conn:
                 cursor = conn.cursor()
                 cursor.execute("SELECT id, status FROM job_history WHERE run_id = ?", (resume_run_id,))
                 job_statuses = {row[0]: row[1] for row in cursor.fetchall()}
@@ -57,7 +60,7 @@ class JobHistoryManager:
         if not self.job_status_batch:
             return
         try:
-            with db_connection() as conn:
+            with db_connection(self.logger) as conn:
                 cursor = conn.cursor()
                 cursor.executemany("""
                     INSERT OR REPLACE INTO job_history
@@ -72,7 +75,7 @@ class JobHistoryManager:
 
     def update_retry_history(self, job_id, retry_history, retry_count, status, reason=None):
         try:
-            with db_connection() as conn:
+            with db_connection(self.logger) as conn:
                 retry_history_json = json.dumps(retry_history)
                 cursor = conn.cursor()
                 cursor.execute("PRAGMA table_info(job_history)")
@@ -149,7 +152,7 @@ class JobHistoryManager:
 
     def get_last_exit_code(self, job_id):
         try:
-            with db_connection() as conn:
+            with db_connection(self.logger) as conn:
                 cursor = conn.cursor()
                 cursor.execute("PRAGMA table_info(job_history)")
                 columns = [col[1] for col in cursor.fetchall()]
