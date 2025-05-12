@@ -1,0 +1,236 @@
+{
+  "application_name": "data_pipeline",
+  "jobs": [
+    {
+      "id": "critical_check",
+      "description": "Critical issue detected in input. This job always fails.",
+      "command": "false # Simulated critical failure",
+      "post_checks": [],
+      "dependencies": []
+    },
+    {
+      "id": "PR_104699",
+      "description": "Running PR_104699.sql",
+      "command": "sqlplus /nolog @PR_104699.sql $(authlookup -u uii0@uiis03 -p) # Run as uii0",
+      "post_checks": [
+        {
+          "name": "check_no_ora_errors",
+          "params": {
+            "log_file": "./logs/PR_104699.log"
+          }
+        }
+      ],
+      "dependencies": [
+        "critical_check"
+      ]
+    },
+    {
+      "id": "PR_104719",
+      "description": "Running PR_104719.sql",
+      "command": "sqlplus /nolog @PR_104719.sql $(authlookup -u uii0@uiis03 -p) # Run as uii0",
+      "post_checks": [
+        {
+          "name": "check_no_ora_errors",
+          "params": {
+            "log_file": "./logs/PR_104719.log"
+          }
+        }
+      ],
+      "dependencies": [
+        "PR_104699"
+      ]
+    },
+    {
+      "id": "PR_104739",
+      "description": "Running PR_104739.sql",
+      "command": "sqlplus /nolog @PR_104739.sql $(authlookup -u uii0@uiis03 -p) # Run as uii0",
+      "post_checks": [
+        {
+          "name": "check_no_ora_errors",
+          "params": {
+            "log_file": "./logs/PR_104739.log"
+          }
+        }
+      ],
+      "dependencies": [
+        "PR_104719"
+      ]
+    },
+    {
+      "id": "PR_104740",
+      "description": "Running PR_104740.sql",
+      "command": "sqlplus /nolog @PR_104740.sql $(authlookup -u uii0@uiis03 -p) # Run as uii0",
+      "post_checks": [
+        {
+          "name": "check_no_ora_errors",
+          "params": {
+            "log_file": "./logs/PR_104740.log"
+          }
+        }
+      ],
+      "dependencies": [
+        "PR_104739"
+      ]
+    },
+    {
+      "id": "PR_104681",
+      "description": "Running PR_104681.sql",
+      "command": "sqlplus /nolog @PR_104681.sql $(authlookup -u uii0@uiis03 -p) # Run as uii0",
+      "post_checks": [
+        {
+          "name": "check_no_ora_errors",
+          "params": {
+            "log_file": "./logs/PR_104681.log"
+          }
+        }
+      ],
+      "dependencies": [
+        "PR_104740"
+      ]
+    },
+    {
+      "id": "PR_104682",
+      "description": "Running PR_104682.sql",
+      "command": "sqlplus /nolog @PR_104682.sql $(authlookup -u uii0@uiis03 -p) # Run as uii0",
+      "post_checks": [
+        {
+          "name": "check_no_ora_errors",
+          "params": {
+            "log_file": "./logs/PR_104682.log"
+          }
+        }
+      ],
+      "dependencies": [
+        "PR_104681"
+      ]
+    },
+    {
+      "id": "PR_104180",
+      "description": "Running PR_104180.sql",
+      "command": "sqlplus /nolog @PR_104180.sql $(authlookup -u uii0@uiis03 -p) # Run as uii0",
+      "post_checks": [
+        {
+          "name": "check_no_ora_errors",
+          "params": {
+            "log_file": "./logs/PR_104180.log"
+          }
+        }
+      ],
+      "dependencies": [
+        "PR_104682"
+      ]
+    },
+    {
+      "id": "PR_104181",
+      "description": "Running PR_104181.sql",
+      "command": "sqlplus /nolog @PR_104181.sql $(authlookup -u uii0@uiis03 -p) # Run as uii0",
+      "post_checks": [
+        {
+          "name": "check_no_ora_errors",
+          "params": {
+            "log_file": "./logs/PR_104181.log"
+          }
+        }
+      ],
+      "dependencies": [
+        "PR_104180"
+      ]
+    },
+    {
+      "id": "PR_104221",
+      "description": "Running PR_104221.sql",
+      "command": "sqlplus /nolog @PR_104221.sql $(authlookup -u uii0@uiis03 -p) # Run as uii0",
+      "post_checks": [
+        {
+          "name": "check_no_ora_errors",
+          "params": {
+            "log_file": "./logs/PR_104221.log"
+          }
+        }
+      ],
+      "dependencies": [
+        "PR_104181"
+      ]
+    },
+    {
+      "id": "PR_104459",
+      "description": "Running PR_104459.sql",
+      "command": "sqlplus /nolog @PR_104459.sql $(authlookup -u uii0@uiis03 -p) # Run as UII0",
+      "post_checks": [
+        {
+          "name": "check_no_ora_errors",
+          "params": {
+            "log_file": "./logs/PR_104459.log"
+          }
+        }
+      ],
+      "dependencies": [
+        "PR_104221"
+      ]
+    },
+    {
+      "id": "PR_104460",
+      "description": "Running PR_104460.sql",
+      "command": "sqlplus /nolog @PR_104460.sql $(authlookup -u uii0@uiis03 -p) # Run as UII0",
+      "post_checks": [
+        {
+          "name": "check_no_ora_errors",
+          "params": {
+            "log_file": "./logs/PR_104460.log"
+          }
+        }
+      ],
+      "dependencies": [
+        "PR_104459"
+      ]
+    },
+    {
+      "id": "PR_104780",
+      "description": "Running PR_104780.sql",
+      "command": "sqlplus /nolog @PR_104780.sql $(authlookup -u uii0@uiis03 -p) # Run as uii0",
+      "post_checks": [
+        {
+          "name": "check_no_ora_errors",
+          "params": {
+            "log_file": "./logs/PR_104780.log"
+          }
+        }
+      ],
+      "dependencies": [
+        "PR_104460"
+      ]
+    },
+    {
+      "id": "PR_104781",
+      "description": "Running PR_104781.sql",
+      "command": "sqlplus /nolog @PR_104781.sql $(authlookup -u uii0@uiis03 -p) # Run as uii0",
+      "post_checks": [
+        {
+          "name": "check_no_ora_errors",
+          "params": {
+            "log_file": "./logs/PR_104781.log"
+          }
+        }
+      ],
+      "dependencies": [
+        "PR_104780"
+      ]
+    },
+    {
+      "id": "run_cmd_1",
+      "description": "Run command: run -u acsdba@uiis03 indexnoparallel # sqlplus PR_",
+      "command": "run -u acsdba@uiis03 indexnoparallel # sqlplus PR_",
+      "dependencies": [
+        "PR_104781"
+      ]
+    },
+    {
+      "id": "run_cmd_2",
+      "description": "Run command: run -u acsdba@uiis03 tablenoparallel # sqlplus PR_",
+      "command": "run -u acsdba@uiis03 tablenoparallel # sqlplus PR_",
+      "dependencies": [
+        "run_cmd_1"
+      ]
+    }
+  ]
+}

@@ -5,3 +5,5 @@ jobs/__pycache__
 *.swx
 *~
 DRY
+*backup
+config/jobs_history.db

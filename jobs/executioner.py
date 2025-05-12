@@ -603,16 +603,33 @@ class JobExecutioner:
         print(f"{Config.COLOR_CYAN}Jobs Completed:{Config.COLOR_RESET} {Config.COLOR_DARK_GREEN}{len(self.completed_jobs)}{Config.COLOR_RESET}")
         print(f"{Config.COLOR_CYAN}Jobs Failed:{Config.COLOR_RESET} {Config.COLOR_RED if len(self.failed_jobs) > 0 else ''}{len(self.failed_jobs)}{Config.COLOR_RESET}")
         print(f"{Config.COLOR_CYAN}Jobs Skipped:{Config.COLOR_RESET} {Config.COLOR_YELLOW if len(self.skip_jobs) > 0 else ''}{len(self.skip_jobs)}{Config.COLOR_RESET}")
-        if self.failed_jobs:
-            print(f"\n{Config.COLOR_CYAN}Failed Jobs (see job log paths below):{Config.COLOR_RESET}")
-            for job_id in self.failed_jobs:
+        # Prepare failed and skipped jobs for summary
+        failed_job_order = [j["id"] for j in self.config["jobs"] if j["id"] in self.failed_jobs]
+        skipped_due_to_deps = []
+        for job_id in self.jobs:
+            if job_id not in self.completed_jobs and job_id not in self.failed_jobs and job_id not in self.skip_jobs:
+                unmet = [dep for dep in self.dependency_manager.get_job_dependencies(job_id) if dep not in self.completed_jobs and dep not in self.skip_jobs]
+                failed_unmet = [dep for dep in unmet if dep in self.failed_jobs]
+                skipped_due_to_deps.append((job_id, unmet, failed_unmet))
+
+        # Print summary
+        if failed_job_order:
+            print("\nFailed Jobs:")
+            for job_id in failed_job_order:
                 job_log_path = self.job_log_paths.get(job_id, None)
                 desc = self.jobs[job_id].get('description', '')
                 reason = self.failed_job_reasons.get(job_id, '')
+                print(f"  - {job_id}: {desc}\n      Reason: {reason}")
                 if job_log_path:
-                    print(f"  - {Config.COLOR_RED}{job_id}{Config.COLOR_RESET}: {desc}\n      Reason: {reason}\n      Log: {job_log_path}")
+                    print(f"      Log: {job_log_path}")
+        if skipped_due_to_deps:
+            print("\nSkipped Jobs (unmet dependencies):")
+            for job_id, unmet, failed_unmet in skipped_due_to_deps:
+                desc = self.jobs[job_id].get('description', '')
+                if failed_unmet:
+                    print(f"  - {job_id}: {desc}\n      Skipped (failed dependencies: {', '.join(failed_unmet)}; other unmet: {', '.join([d for d in unmet if d not in failed_unmet])})")
                 else:
-                    print(f"  - {Config.COLOR_RED}{job_id}{Config.COLOR_RESET}: {desc}\n      Reason: {reason}")
+                    print(f"  - {job_id}: {desc}\n      Skipped (unmet dependencies: {', '.join(unmet)})")
         print(f"{divider}")
         print("\n")
         return self.exit_code
@@ -679,7 +696,6 @@ class JobExecutioner:
                 else:
                     self.failed_jobs.add(job_id)
                     self.failed_job_reasons[job_id] = fail_reason or "Unknown failure"
-                    self._mark_dependent_jobs_failed(job_id, fail_reason or "Dependency failed")
                     if not self.continue_on_error:
                         self.exit_code = 1
                         break
@@ -713,7 +729,6 @@ class JobExecutioner:
                             else:
                                 self.failed_jobs.add(job_id)
                                 self.failed_job_reasons[job_id] = fail_reason or "Unknown failure"
-                                self._mark_dependent_jobs_failed(job_id, fail_reason or "Dependency failed")
                                 if not self.continue_on_error:
                                     self.exit_code = 1
                                     self.interrupted = True
@@ -722,7 +737,6 @@ class JobExecutioner:
                         except Exception as e:
                             self.logger.error(f"Job {job_id} raised exception: {e}")
                             self.failed_jobs.add(job_id)
-                            self._mark_dependent_jobs_failed(job_id, f"Exception: {e}")
                             if not self.continue_on_error:
                                 self.exit_code = 1
                                 self.interrupted = True
@@ -826,23 +840,6 @@ class JobExecutioner:
                             self.logger.warning(f"Job {job_id} abandoned during shutdown")
         return iteration_count
 
-    def _mark_dependent_jobs_failed(self, failed_job_id: str, reason: str = None):
-        with self.lock:
-            visited = set()
-            queue = [failed_job_id]
-            while queue:
-                current_job = queue.pop(0)
-                if current_job in visited:
-                    continue
-                visited.add(current_job)
-                for job_id, deps in self.dependency_manager.get_all_dependencies().items():
-                    if current_job in deps and job_id not in visited:
-                        if job_id not in self.completed_jobs and job_id not in self.skip_jobs:
-                            self.logger.debug(f"Marking job {job_id} as failed due to dependency on {current_job}")
-                            self.failed_jobs.add(job_id)
-                            self.failed_job_reasons[job_id] = f"Dependency failed: {current_job}" if not reason else reason
-                            queue.append(job_id)
-
     def _queue_dependent_jobs(self, completed_job_id: str):
         if self.dry_run:
             return
@@ -893,29 +890,31 @@ class JobExecutioner:
             f"Application: {self.application_name}\n"
             f"Run ID: {self.run_id}\n"
             f"Status: {status}\n"
-            f"Start Time: {self.start_time.strftime('%Y-%m-%d %H:%M:%S') if self.start_time else 'N/A'}\n"
-            f"End Time: {self.end_time.strftime('%Y-%m-%d %H:%M:%S') if self.end_time else 'N/A'}\n"
+            f"Start Time: {self.start_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"End Time: {self.end_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
             f"Duration: {duration_str}\n"
             f"Jobs Completed: {len(self.completed_jobs)}\n"
             f"Jobs Failed: {len(self.failed_jobs)}\n"
-            f"Jobs Skipped: {len(self.skip_jobs)}\n"
+            f"Jobs Skipped: {len(self.skip_jobs) + len(skipped_due_to_deps)}\n"
         )
-        if self.failed_jobs:
-            failed_jobs_str = ", ".join(self.failed_jobs)
-            summary += f"\nFailed Jobs: {failed_jobs_str}"
-        # Add detailed failed jobs section
-        failed_jobs_details = ""
-        if self.failed_jobs:
-            failed_jobs_details += "\n\nFailed Jobs (see job log paths below):\n"
-            for job_id in self.failed_jobs:
+        if failed_job_order:
+            summary += "\nFailed Jobs:\n"
+            for job_id in failed_job_order:
                 job_log_path = self.job_log_paths.get(job_id, None)
                 desc = self.jobs[job_id].get('description', '')
                 reason = self.failed_job_reasons.get(job_id, '')
-                failed_jobs_details += f"  - {job_id}: {desc}\n      Reason: {reason}"
+                summary += f"  - {job_id}: {desc}\n      Reason: {reason}"
                 if job_log_path:
-                    failed_jobs_details += f"\n      Log: {job_log_path}"
-                failed_jobs_details += "\n"
-        summary += failed_jobs_details
+                    summary += f"\n      Log: {job_log_path}"
+                summary += "\n"
+        if skipped_due_to_deps:
+            summary += "\nSkipped Jobs (unmet dependencies):\n"
+            for job_id, unmet, failed_unmet in skipped_due_to_deps:
+                desc = self.jobs[job_id].get('description', '')
+                if failed_unmet:
+                    summary += f"  - {job_id}: {desc}\n      Skipped (failed dependencies: {', '.join(failed_unmet)}; other unmet: {', '.join([d for d in unmet if d not in failed_unmet])})\n"
+                else:
+                    summary += f"  - {job_id}: {desc}\n      Skipped (unmet dependencies: {', '.join(unmet)})\n"
         # Collect all log files for this run
         log_pattern = os.path.join(Config.LOG_DIR, f"executioner.{self.application_name}.job-*.run-{self.run_id}.log")
         attachments = glob.glob(log_pattern)
