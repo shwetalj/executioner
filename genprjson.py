@@ -4,16 +4,17 @@ import sys
 import json
 import re
 
-def parse_prhelper(lines):
+def parse_prhelper(lines, log_dir):
     jobs = []
-    sql_cmd_pattern = re.compile(r"sqlplus /nolog @(PR_\d+\.sql) .*")
+    sql_cmd_pattern = re.compile(r"sqlplus /nolog @(PR_(\d+)\.sql) .*")
     for line in lines:
         match = sql_cmd_pattern.search(line)
         if match:
             sql_file = match.group(1)
+            pr_number = match.group(2)
             job_id = sql_file.replace('.sql', '')
             command = line.strip()
-            log_file = f"./logs/{job_id}.log"
+            log_file = f"{log_dir}*{pr_number}*.log"
             job = {
                 "id": job_id,
                 "description": f"Running {sql_file}",
@@ -50,7 +51,16 @@ def main():
     else:
         lines = sys.stdin.readlines()
 
-    jobs = parse_prhelper(lines)
+    # Find log directory from input, default to './logs/'
+    log_dir = './logs/'
+    for line in lines:
+        if line.strip().startswith('Log Directory:'):
+            log_dir = line.split(':', 1)[1].strip()
+            if not log_dir.endswith('/'):
+                log_dir += '/'
+            break
+
+    jobs = parse_prhelper(lines, log_dir)
     # Insert a critical job at the beginning if 'CRITICAL' is found
     if any('CRITICAL' in line for line in lines):
         critical_job = {

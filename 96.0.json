@@ -16,7 +16,7 @@
         {
           "name": "check_no_ora_errors",
           "params": {
-            "log_file": "./logs/PR_104699.log"
+            "log_file": "/dba_work_area/PRs/96.0/logs/uiis03/*104699*.log"
           }
         }
       ],
@@ -32,7 +32,7 @@
         {
           "name": "check_no_ora_errors",
           "params": {
-            "log_file": "./logs/PR_104719.log"
+            "log_file": "/dba_work_area/PRs/96.0/logs/uiis03/*104719*.log"
           }
         }
       ],
@@ -48,7 +48,7 @@
         {
           "name": "check_no_ora_errors",
           "params": {
-            "log_file": "./logs/PR_104739.log"
+            "log_file": "/dba_work_area/PRs/96.0/logs/uiis03/*104739*.log"
           }
         }
       ],
@@ -64,7 +64,7 @@
         {
           "name": "check_no_ora_errors",
           "params": {
-            "log_file": "./logs/PR_104740.log"
+            "log_file": "/dba_work_area/PRs/96.0/logs/uiis03/*104740*.log"
           }
         }
       ],
@@ -80,7 +80,7 @@
         {
           "name": "check_no_ora_errors",
           "params": {
-            "log_file": "./logs/PR_104681.log"
+            "log_file": "/dba_work_area/PRs/96.0/logs/uiis03/*104681*.log"
           }
         }
       ],
@@ -96,7 +96,7 @@
         {
           "name": "check_no_ora_errors",
           "params": {
-            "log_file": "./logs/PR_104682.log"
+            "log_file": "/dba_work_area/PRs/96.0/logs/uiis03/*104682*.log"
           }
         }
       ],
@@ -112,7 +112,7 @@
         {
           "name": "check_no_ora_errors",
           "params": {
-            "log_file": "./logs/PR_104180.log"
+            "log_file": "/dba_work_area/PRs/96.0/logs/uiis03/*104180*.log"
           }
         }
       ],
@@ -128,7 +128,7 @@
         {
           "name": "check_no_ora_errors",
           "params": {
-            "log_file": "./logs/PR_104181.log"
+            "log_file": "/dba_work_area/PRs/96.0/logs/uiis03/*104181*.log"
           }
         }
       ],
@@ -144,7 +144,7 @@
         {
           "name": "check_no_ora_errors",
           "params": {
-            "log_file": "./logs/PR_104221.log"
+            "log_file": "/dba_work_area/PRs/96.0/logs/uiis03/*104221*.log"
           }
         }
       ],
@@ -160,7 +160,7 @@
         {
           "name": "check_no_ora_errors",
           "params": {
-            "log_file": "./logs/PR_104459.log"
+            "log_file": "/dba_work_area/PRs/96.0/logs/uiis03/*104459*.log"
           }
         }
       ],
@@ -176,7 +176,7 @@
         {
           "name": "check_no_ora_errors",
           "params": {
-            "log_file": "./logs/PR_104460.log"
+            "log_file": "/dba_work_area/PRs/96.0/logs/uiis03/*104460*.log"
           }
         }
       ],
@@ -192,7 +192,7 @@
         {
           "name": "check_no_ora_errors",
           "params": {
-            "log_file": "./logs/PR_104780.log"
+            "log_file": "/dba_work_area/PRs/96.0/logs/uiis03/*104780*.log"
           }
         }
       ],
@@ -208,7 +208,7 @@
         {
           "name": "check_no_ora_errors",
           "params": {
-            "log_file": "./logs/PR_104781.log"
+            "log_file": "/dba_work_area/PRs/96.0/logs/uiis03/*104781*.log"
           }
         }
       ],
