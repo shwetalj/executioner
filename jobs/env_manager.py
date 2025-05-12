@@ -1,12 +1,4 @@
-def merge_env_vars(app_env, job_env):
-    """
-    Merge application-level and job-level environment variables.
-    Job-level variables take precedence. All values are converted to strings.
-    """
-    merged = {k: str(v) for k, v in (app_env or {}).items()}
-    for k, v in (job_env or {}).items():
-        merged[k] = str(v)
-    return merged
+from jobs.env_utils import merge_env_vars, validate_env_vars
 
 # Optionally, add validation or expansion logic here in the future.
 

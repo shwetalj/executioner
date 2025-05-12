@@ -37,7 +37,7 @@ from jobs.dependency_manager import DependencyManager
 
 from jobs.notification_manager import NotificationManager
 from jobs.command_utils import validate_command, parse_command
-from jobs.env_manager import merge_env_vars
+from jobs.env_utils import merge_env_vars
 
 class JobExecutioner:
     def __init__(self, config_file: str):

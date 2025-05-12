@@ -1,11 +1,6 @@
 DRY Opportunities in the Executioner Codebase
 ============================================
 
-2. Environment Variable Handling
--------------------------------
-Multiple places parse, merge, validate, and substitute environment variables (executioner.py, jobs/env_manager.py, jobs/executioner.py, etc.).
-* DRY Solution: Consolidate all environment variable logic (parsing, merging, substitution, validation) into a single utility module (e.g., env_utils.py). Ensure all code uses these shared functions.
-
 3. Database Connection and Query Patterns
 ----------------------------------------
 Direct use of sqlite3.connect and similar database access patterns are present in several files.
@@ -52,7 +47,6 @@ Summary Table of Key DRY Opportunities
 
 | Area                      | Files/Modules Affected                | DRY Solution Suggestion         |
 |---------------------------|---------------------------------------|---------------------------------|
-| Env var handling          | executioner.py, jobs/env_manager.py   | Shared env utils module         |
 | DB connection/query       | db/sqlite_backend.py, job_history...  | DB helper/context manager       |
 | Job status/retry logic    | job_history_manager.py, job_runner.py | Shared methods/mixin            |
 | Time period/date handling | timeperiod.py                         | Shared helpers, higher-order fn |
