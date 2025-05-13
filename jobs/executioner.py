@@ -883,6 +883,13 @@ class JobExecutioner:
 
     def _send_notification(self, success: bool):
         """Send an email notification using NotificationManager."""
+        failed_job_order = [j["id"] for j in self.config["jobs"] if j["id"] in self.failed_jobs]
+        skipped_due_to_deps = []
+        for job_id in self.jobs:
+            if job_id not in self.completed_jobs and job_id not in self.failed_jobs and job_id not in self.skip_jobs:
+                unmet = [dep for dep in self.dependency_manager.get_job_dependencies(job_id) if dep not in self.completed_jobs and dep not in self.skip_jobs]
+                failed_unmet = [dep for dep in unmet if dep in self.failed_jobs]
+                skipped_due_to_deps.append((job_id, unmet, failed_unmet))
         status = "SUCCESS" if success else "FAILED"
         duration = self.end_time - self.start_time if self.end_time and self.start_time else None
         duration_str = str(duration).split('.')[0] if duration else "N/A"
