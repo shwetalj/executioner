@@ -1,5 +1,5 @@
 logs
-jobs/__pycache__
+*/__pycache__/*
 *.swp
 *.swo
 *.swx
