@@ -200,15 +200,17 @@ Notes:
     # Store original job-level envs for each job before merging
     original_job_envs = {job_id: dict(job.get("env_variables", {})) for job_id, job in executioner.jobs.items()}
 
-    if args.env:
-        env_vars = parse_env_vars(args.env, debug=args.debug)
-        if env_vars:
-            for job_id, job in executioner.jobs.items():
-                job["env_variables"] = job.get("env_variables", {})
-                job["env_variables"].update(env_vars)
-                # Perform variable substitution in all job fields using merged envs
-                merged_envs = job["env_variables"]
-                executioner.jobs[job_id] = substitute_env_vars_in_obj(job, merged_envs)
+    # Parse CLI envs if provided
+    env_vars = parse_env_vars(args.env, debug=args.debug) if args.env else {}
+
+    # Always perform substitution for every job, merging app-level, job-level, and CLI envs
+    for job_id, job in executioner.jobs.items():
+        merged_envs = dict(executioner.app_env_variables)
+        merged_envs.update(original_job_envs.get(job_id, {}))
+        merged_envs.update(env_vars)
+        job["env_variables"] = merged_envs
+        executioner.jobs[job_id] = substitute_env_vars_in_obj(job, merged_envs)
+
     # Show merged environment for each job
     if args.visible or args.debug:
         print("\n===== Environment Variables for Each Job (Precedence: CLI > Job > Application) =====")
