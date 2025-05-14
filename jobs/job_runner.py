@@ -216,11 +216,11 @@ class JobRunner(JobStatusMixin):
                 except Exception as e:
                     job_logger.error(f"Error terminating process on timeout: {e}")
                 stop_reading.set()
-                reader_thread.join(timeout=2)
+                reader_thread.join()
                 self.mark_failed(self.job_id, "TIMEOUT")
                 return "TIMEOUT"
             stop_reading.set()
-            reader_thread.join(timeout=2)
+            reader_thread.join()
             if exit_code == 0:
                 job_logger.info(f"Job {self.job_id}: SUCCESS")
                 self.mark_success(self.job_id)

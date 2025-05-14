@@ -1,0 +1,21 @@
+{
+  "application_name": "meta-executioner-demo",
+  "jobs": [
+    {
+      "id": "echo_hello",
+      "description": "Echo hello world",
+      "command": "echo Hello from the meta executioner!"
+    },
+    {
+      "id": "echo_nested_executioner",
+      "description": "Pretend to run a nested executioner config",
+      "command": "./executioner.py -c config/child_executioner.json"
+    },
+    {
+      "id": "echo_goodbye",
+      "description": "Echo goodbye",
+      "command": "echo Goodbye from the meta executioner!",
+      "dependencies": ["echo_nested_executioner"]
+    }
+  ]
+} 

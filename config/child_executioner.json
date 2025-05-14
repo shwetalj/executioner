@@ -1,0 +1,10 @@
+{
+  "application_name": "child_executioner",
+  "jobs": [
+    {
+      "id": "echo_hello",
+      "description": "I am a child of executioner",
+      "command": "False"
+    }  
+  ]
+} 
