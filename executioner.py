@@ -43,9 +43,6 @@ from config.validator import validate_config
 from jobs.executioner import JobExecutioner
 from jobs.env_utils import parse_env_vars, substitute_env_vars_in_obj
 
-# Ensure log directory is created securely
-ensure_log_dir()
-
 SAMPLE_CONFIG = """{
     "application_name": "data_pipeline",
     "default_timeout": 10800,
@@ -193,7 +190,16 @@ Notes:
         print("-" * 80)
         print("Copy and modify as needed for your own pipeline.")
         sys.exit(0)
-        
+
+    # Load config file and set log dir BEFORE init_db or JobExecutioner
+    with open(args.config, 'r') as f:
+        config_data = json.load(f)
+    if "log_dir" in config_data:
+        Config.set_log_dir(config_data["log_dir"])
+    else:
+        Config.set_log_dir(Path.cwd() / "logs")
+    ensure_log_dir()
+
     init_db(verbose=args.verbose)
     executioner = JobExecutioner(args.config)
 

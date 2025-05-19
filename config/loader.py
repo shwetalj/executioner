@@ -5,7 +5,7 @@ class Config:
     BASE_DIR = Path(__file__).resolve().parent
     # Use current working directory for logs
     CWD = Path.cwd()
-    LOG_DIR = (CWD / 'logs').resolve()
+    LOG_DIR = None  # Set after config is loaded
     DB_FILE = BASE_DIR / 'jobs_history.db'
     DEFAULT_TIMEOUT = 600
     MAX_LOG_SIZE = 10 * 1024 * 1024
@@ -19,3 +19,8 @@ class Config:
     COLOR_YELLOW = "\033[93m"
     COLOR_MAGENTA = "\033[95m"
     COLOR_RESET = "\033[0m" 
+
+    @classmethod
+    def set_log_dir(cls, log_dir):
+        cls.LOG_DIR = Path(log_dir).resolve() 
+        

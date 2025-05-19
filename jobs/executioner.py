@@ -177,10 +177,13 @@ class JobExecutioner:
                 sys.exit(1)
 
     def _setup_job_logger(self, job_id: str) -> Tuple[logging.Logger, logging.FileHandler, str]:
-        job_log_path = os.path.join(Config.LOG_DIR, f"executioner.{self.application_name}.job-{job_id}.run-{self.run_id}.log")
+        job = self.jobs[job_id]
+        job_log_dir = job.get("log_dir", Config.LOG_DIR)
+        os.makedirs(job_log_dir, exist_ok=True)
+        job_log_path = os.path.join(job_log_dir, f"executioner.{self.application_name}.job-{job_id}.run-{self.run_id}.log")
         job_logger, job_file_handler = setup_job_logger(self.application_name, self.run_id, job_id, job_log_path)
-        job_description = self.jobs[job_id].get('description', '')
-        job_command = self.jobs[job_id]['command']
+        job_description = job.get('description', '')
+        job_command = job['command']
         job_logger.info(f"Executing job - {job_id}: {job_command}")
         self.job_log_paths[job_id] = job_log_path  # Store the job log path
         return job_logger, job_file_handler, job_log_path
