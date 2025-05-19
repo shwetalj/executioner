@@ -211,16 +211,26 @@ class JobRunner(JobStatusMixin):
                     if 'posix' in os.name:
                         import signal
                         os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+                        time.sleep(1)
+                        if process.poll() is None:
+                            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
                     else:
                         process.terminate()
+                        time.sleep(1)
+                        if process.poll() is None:
+                            process.kill()
                 except Exception as e:
                     job_logger.error(f"Error terminating process on timeout: {e}")
                 stop_reading.set()
-                reader_thread.join()
+                reader_thread.join(timeout=5)
+                if reader_thread.is_alive():
+                    job_logger.warning("Output reading thread did not terminate cleanly after timeout")
                 self.mark_failed(self.job_id, "TIMEOUT")
                 return "TIMEOUT"
             stop_reading.set()
-            reader_thread.join()
+            reader_thread.join(timeout=5)
+            if reader_thread.is_alive():
+                job_logger.warning("Output reading thread did not terminate cleanly after process exit")
             if exit_code == 0:
                 job_logger.info(f"Job {self.job_id}: SUCCESS")
                 self.mark_success(self.job_id)
