@@ -1,0 +1,27 @@
+{
+  "application_name": "test_env",
+  "env_variables": {
+    "GLOBAL_MSG": "SHWETAL_GLOBAL"
+  },
+  "jobs": [
+    {
+      "id": "echo_global",
+      "description": "Echo a global environment variable",
+      "command": "echo ${GLOBAL_MSG}"
+    },
+    {
+      "id": "echo_job",
+      "description": "Echo a job-level environment variable",
+      "command": "echo ${JOB_MSG}",
+      "env_variables": {
+        "JOB_MSG": "SHWETAL_JOB"
+      }
+    },
+    {
+      "id": "echo_cli",
+      "description": "Echo a CLI environment variable",
+      "command": "echo ${CLI_MSG}"
+    }
+  ]
+}
+

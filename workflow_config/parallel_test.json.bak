@@ -1,0 +1,61 @@
+{
+    "application_name": "parallel_test",
+    "email_address": "test@example.com",
+    "email_on_success": false,
+    "email_on_failure": false,
+    "parallel": true,
+    "max_workers": 3,
+    "env_variables": {
+        "APP_ENV": "test",
+        "LOG_LEVEL": "debug"
+    },
+    "jobs": [
+        {
+            "id": "independent_job1",
+            "description": "First independent job",
+            "command": "python3 /home/sjoshi/claudelab/executioner/test_scripts/success_script.py",
+            "timeout": 10,
+            "env_variables": {
+                "TEST_JOB": "independent_job1"
+            }
+        },
+        {
+            "id": "independent_job2",
+            "description": "Second independent job",
+            "command": "python3 /home/sjoshi/claudelab/executioner/test_scripts/success_script.py",
+            "timeout": 10,
+            "env_variables": {
+                "TEST_JOB": "independent_job2"
+            }
+        },
+        {
+            "id": "independent_job3",
+            "description": "Third independent job",
+            "command": "python3 /home/sjoshi/claudelab/executioner/test_scripts/success_script.py",
+            "timeout": 10,
+            "env_variables": {
+                "TEST_JOB": "independent_job3"
+            }
+        },
+        {
+            "id": "dependent_job1",
+            "description": "First dependent job",
+            "command": "python3 /home/sjoshi/claudelab/executioner/test_scripts/success_script.py",
+            "dependencies": ["independent_job1", "independent_job2"],
+            "timeout": 10,
+            "env_variables": {
+                "TEST_JOB": "dependent_job1"
+            }
+        },
+        {
+            "id": "dependent_job2",
+            "description": "Second dependent job",
+            "command": "python3 /home/sjoshi/claudelab/executioner/test_scripts/success_script.py",
+            "dependencies": ["independent_job3", "dependent_job1"],
+            "timeout": 10,
+            "env_variables": {
+                "TEST_JOB": "dependent_job2"
+            }
+        }
+    ]
+}

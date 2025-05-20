@@ -1,0 +1,10 @@
+{
+    "application_name": "minimal_job_test",
+    "email_address": "test@example.com",
+    "jobs": [
+        {
+            "id": "job1",
+            "command": "echo 'Minimal job'"
+        }
+    ]
+} 

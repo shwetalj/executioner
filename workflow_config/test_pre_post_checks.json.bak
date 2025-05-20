@@ -1,0 +1,16 @@
+{
+  "application_name": "test_pre_post_checks",
+  "env_variables": {},
+  "jobs": [
+    {
+      "id": "job1",
+      "command": "echo 'Simulating Oracle job ORA-' > ./logs/output.log && echo 'No errors' >> output.log",
+      "pre_checks": [
+        {"name": "check_file_exists", "params": {"path": "input.sql"}}
+      ],
+      "post_checks": [
+        {"name": "check_no_ora_errors", "params": {"log_file": "./logs/output.log"}}
+      ]
+    }
+  ]
+} 

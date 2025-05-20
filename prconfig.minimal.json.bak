@@ -1,0 +1,175 @@
+{
+  "application_name": "data_pipeline",
+  "jobs": [
+    {
+      "job_id": "PR_104699",
+      "job_description": "Running PR_104699.sql",
+      "command": "sqlplus /nolog @PR_104699.sql $(authlookup -u uii0@uiis03 -p)",
+      "post_checks": [
+        {
+          "name": "check_no_ora_errors",
+          "params": {
+            "log_file": "./logs/PR_104699.log"
+          }
+        }
+      ]
+    },
+    {
+      "job_id": "PR_104719",
+      "job_description": "Running PR_104719.sql",
+      "command": "sqlplus /nolog @PR_104719.sql $(authlookup -u uii0@uiis03 -p)",
+      "post_checks": [
+        {
+          "name": "check_no_ora_errors",
+          "params": {
+            "log_file": "./logs/PR_104719.log"
+          }
+        }
+      ]
+    },
+    {
+      "job_id": "PR_104739",
+      "job_description": "Running PR_104739.sql",
+      "command": "sqlplus /nolog @PR_104739.sql $(authlookup -u uii0@uiis03 -p)",
+      "post_checks": [
+        {
+          "name": "check_no_ora_errors",
+          "params": {
+            "log_file": "./logs/PR_104739.log"
+          }
+        }
+      ]
+    },
+    {
+      "job_id": "PR_104740",
+      "job_description": "Running PR_104740.sql",
+      "command": "sqlplus /nolog @PR_104740.sql $(authlookup -u uii0@uiis03 -p)",
+      "post_checks": [
+        {
+          "name": "check_no_ora_errors",
+          "params": {
+            "log_file": "./logs/PR_104740.log"
+          }
+        }
+      ]
+    },
+    {
+      "job_id": "PR_104681",
+      "job_description": "Running PR_104681.sql",
+      "command": "sqlplus /nolog @PR_104681.sql $(authlookup -u uii0@uiis03 -p)",
+      "post_checks": [
+        {
+          "name": "check_no_ora_errors",
+          "params": {
+            "log_file": "./logs/PR_104681.log"
+          }
+        }
+      ]
+    },
+    {
+      "job_id": "PR_104682",
+      "job_description": "Running PR_104682.sql",
+      "command": "sqlplus /nolog @PR_104682.sql $(authlookup -u uii0@uiis03 -p)",
+      "post_checks": [
+        {
+          "name": "check_no_ora_errors",
+          "params": {
+            "log_file": "./logs/PR_104682.log"
+          }
+        }
+      ]
+    },
+    {
+      "job_id": "PR_104180",
+      "job_description": "Running PR_104180.sql",
+      "command": "sqlplus /nolog @PR_104180.sql $(authlookup -u uii0@uiis03 -p)",
+      "post_checks": [
+        {
+          "name": "check_no_ora_errors",
+          "params": {
+            "log_file": "./logs/PR_104180.log"
+          }
+        }
+      ]
+    },
+    {
+      "job_id": "PR_104181",
+      "job_description": "Running PR_104181.sql",
+      "command": "sqlplus /nolog @PR_104181.sql $(authlookup -u uii0@uiis03 -p)",
+      "post_checks": [
+        {
+          "name": "check_no_ora_errors",
+          "params": {
+            "log_file": "./logs/PR_104181.log"
+          }
+        }
+      ]
+    },
+    {
+      "job_id": "PR_104221",
+      "job_description": "Running PR_104221.sql",
+      "command": "sqlplus /nolog @PR_104221.sql $(authlookup -u uii0@uiis03 -p)",
+      "post_checks": [
+        {
+          "name": "check_no_ora_errors",
+          "params": {
+            "log_file": "./logs/PR_104221.log"
+          }
+        }
+      ]
+    },
+    {
+      "job_id": "PR_104459",
+      "job_description": "Running PR_104459.sql",
+      "command": "sqlplus /nolog @PR_104459.sql $(authlookup -u uii0@uiis03 -p)",
+      "post_checks": [
+        {
+          "name": "check_no_ora_errors",
+          "params": {
+            "log_file": "./logs/PR_104459.log"
+          }
+        }
+      ]
+    },
+    {
+      "job_id": "PR_104460",
+      "job_description": "Running PR_104460.sql",
+      "command": "sqlplus /nolog @PR_104460.sql $(authlookup -u uii0@uiis03 -p)",
+      "post_checks": [
+        {
+          "name": "check_no_ora_errors",
+          "params": {
+            "log_file": "./logs/PR_104460.log"
+          }
+        }
+      ]
+    },
+    {
+      "job_id": "PR_104780",
+      "job_description": "Running PR_104780.sql",
+      "command": "sqlplus /nolog @PR_104780.sql $(authlookup -u uii0@uiis03 -p)",
+      "post_checks": [
+        {
+          "name": "check_no_ora_errors",
+          "params": {
+            "log_file": "./logs/PR_104780.log"
+          }
+        }
+      ]
+    },
+    {
+      "job_id": "PR_104781",
+      "job_description": "Running PR_104781.sql",
+      "command": "sqlplus /nolog @PR_104781.sql $(authlookup -u uii0@uiis03 -p)",
+      "post_checks": [
+        {
+          "name": "check_no_ora_errors",
+          "params": {
+            "log_file": "./logs/PR_104781.log"
+          }
+        }
+      ]
+    }
+  ]
+}
+
