@@ -9,7 +9,7 @@
         {"name": "check_file_exists", "params": {"path": "input.sql"}}
       ],
       "post_checks": [
-        {"name": "check_no_ora_errors", "params": {"log_file": "./logs/output.log"}}
+        {"name": "check_no_ora_errors", "params": {"log_file": "./logs/out*.log"}}
       ]
     }
   ]
