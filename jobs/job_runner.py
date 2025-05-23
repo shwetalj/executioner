@@ -95,6 +95,7 @@ class JobRunner(JobStatusMixin):
                 exit_code = None
                 try:
                     status = self._run_command(command, timeout, job_logger)
+                    exit_code = getattr(self, 'last_exit_code', None)
                 except Exception as e:
                     status = "ERROR"
                     job_logger.error(f"Exception during job execution: {e}")
@@ -185,7 +186,7 @@ class JobRunner(JobStatusMixin):
             env=env,
             preexec_fn=os.setsid if 'posix' in os.name else None
         )
-        output_lines = []
+        self.last_exit_code = None  # Track exit code
         stop_reading = threading.Event()
         def read_output():
             try:
@@ -193,7 +194,6 @@ class JobRunner(JobStatusMixin):
                     if stop_reading.is_set():
                         break
                     job_logger.info(line.rstrip())
-                    output_lines.append(line.rstrip())
             except Exception as e:
                 job_logger.error(f"Error reading process output: {e}")
         reader_thread = threading.Thread(target=read_output, daemon=True)
@@ -225,12 +225,15 @@ class JobRunner(JobStatusMixin):
                 reader_thread.join(timeout=5)
                 if reader_thread.is_alive():
                     job_logger.warning("Output reading thread did not terminate cleanly after timeout")
+                # Set exit code to -1 for timeout
+                self.last_exit_code = -1
                 self.mark_failed(self.job_id, "TIMEOUT")
                 return "TIMEOUT"
             stop_reading.set()
             reader_thread.join(timeout=5)
             if reader_thread.is_alive():
                 job_logger.warning("Output reading thread did not terminate cleanly after process exit")
+            self.last_exit_code = exit_code
             if exit_code == 0:
                 job_logger.info(f"Job {self.job_id}: SUCCESS")
                 self.mark_success(self.job_id)
@@ -241,6 +244,8 @@ class JobRunner(JobStatusMixin):
                 return "FAILED"
         except Exception as e:
             job_logger.error(f"Exception during command execution: {e}")
+            # Set exit code to -2 for exceptions
+            self.last_exit_code = -2
             self.mark_failed(self.job_id, "ERROR")
             return "ERROR"
         finally:

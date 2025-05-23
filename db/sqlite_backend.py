@@ -20,6 +20,13 @@ def db_connection(logger):
         conn.execute("PRAGMA busy_timeout = 3000")  # 3 seconds
         yield conn
     except sqlite3.Error as e:
+        # Rollback any pending transaction before re-raising
+        if conn:
+            try:
+                conn.rollback()
+                logger.debug("Rolled back transaction due to database error")
+            except sqlite3.Error:
+                pass  # Connection might be broken
         logger.error(f"Database error: {e}")
         raise
     finally:
@@ -209,10 +216,22 @@ def init_db(verbose=False, logger=None):
                 logger.info(f"Database schema is up to date (version {final_version})")
             logger.info(f"Database initialization completed successfully")
     except sqlite3.Error as e:
+        # Rollback any pending transaction
         try:
             if 'conn' in locals() and conn:
                 conn.rollback()
-        except Exception:
-            pass  # Best effort rollback attempt
+                logger.debug("Transaction rolled back due to error")
+        except sqlite3.Error as rollback_error:
+            logger.error(f"Failed to rollback transaction: {rollback_error}")
         logger.error(f"Database initialization error: {e}")
+        sys.exit(1)
+    except Exception as e:
+        # Handle non-database exceptions
+        try:
+            if 'conn' in locals() and conn:
+                conn.rollback()
+                logger.debug("Transaction rolled back due to error")
+        except sqlite3.Error as rollback_error:
+            logger.error(f"Failed to rollback transaction: {rollback_error}")
+        logger.error(f"Unexpected error during database initialization: {e}")
         sys.exit(1) 
