@@ -120,7 +120,7 @@ SAMPLE_CONFIG = """{
 }"""
 
 def main():
-    epilog_text = f"""
+    epilog_text = """
 Examples:
   %(prog)s -c jobs_config.json
   %(prog)s -c jobs_config.json --continue-on-error
@@ -134,34 +134,36 @@ Examples:
   %(prog)s --sample-config        # Shows sample configuration format
 
 Notes:
-- Set 'allow_shell: false' in the config to disable shell=True for security.
-- Use SMTP authentication by specifying smtp_user and smtp_password.
-- Environment variables: Command-line > job-specific > application-level.
-- You can supply CLI envs as --env KEY=VAL or --env KEY=VAL,KEY2=VAL2 (CSV).
-- Logs are stored in {Config.LOG_DIR} with rotation.
-- Use --sample-config to see a sample configuration file.
+- Default config file: jobs_config.json (if -c not specified)
+- Set 'allow_shell: false' in config to disable shell execution (more secure)
+- Use 'smtp_*' settings in config for email authentication
+- Environment variable precedence: CLI > job-level > application-level
+- CLI env formats: --env KEY=VAL or --env KEY1=VAL1,KEY2=VAL2
+- Logs are stored in ./logs/ directory with automatic rotation
+- Use --parallel in config or CLI for concurrent job execution
+- Use --dry-run to validate config and see execution plan
 """
     parser = argparse.ArgumentParser(
-        description="Enhanced Job Execution Engine",
+        description="Executioner - A robust job execution engine with dependency management, parallel execution, and retry capabilities",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=epilog_text
     )
-    parser.add_argument("-c", "--config", default="jobs_config.json", help="Path to job configuration file")
-    parser.add_argument("--continue-on-error", action="store_true", help="Continue on job failure")
-    parser.add_argument("--dry-run", action="store_true", help="Simulate execution")
-    parser.add_argument("--skip", nargs='+', help="Job IDs to skip")
-    parser.add_argument("--env", action='append', help="Environment variables (KEY=value or KEY=value,KEY2=value2; CLI overrides config)")
+    parser.add_argument("-c", "--config", default="jobs_config.json", help="Path to job configuration file (default: jobs_config.json)")
+    parser.add_argument("--continue-on-error", action="store_true", help="Continue executing remaining jobs even if a job fails")
+    parser.add_argument("--dry-run", action="store_true", help="Show what would be executed without actually running jobs")
+    parser.add_argument("--skip", nargs='+', metavar="JOB_ID", help="Skip specified job IDs during execution")
+    parser.add_argument("--env", action='append', help="Set environment variables (KEY=value or KEY1=val1,KEY2=val2)")
     parser.add_argument("--sample-config", action="store_true", help="Display a sample configuration file and exit")
-    parser.add_argument("--debug", action="store_true", help="Enable debug logging and extra troubleshooting output")
-    parser.add_argument("--verbose", action="store_true", help="Enable verbose logging (INFO level)")
-    parser.add_argument("--visible", action="store_true", help="Show environment variables applied to jobs on screen")
+    parser.add_argument("--debug", action="store_true", help="Enable debug logging (most detailed output)")
+    parser.add_argument("--verbose", action="store_true", help="Enable verbose logging (INFO level messages)")
+    parser.add_argument("--visible", action="store_true", help="Display all environment variables for each job before execution")
     parallel_group = parser.add_argument_group("Parallel execution options")
-    parallel_group.add_argument("--parallel", action="store_true", help="Enable parallel execution")
-    parallel_group.add_argument("--workers", type=int, metavar="N", help="Number of parallel workers")
-    parallel_group.add_argument("--sequential", action="store_true", help="Force sequential execution")
+    parallel_group.add_argument("--parallel", action="store_true", help="Enable parallel job execution (overrides config setting)")
+    parallel_group.add_argument("--workers", type=int, metavar="N", help="Number of parallel workers (default: from config or 1)")
+    parallel_group.add_argument("--sequential", action="store_true", help="Force sequential execution even if config enables parallel")
     resume_group = parser.add_argument_group("Resume options")
-    resume_group.add_argument("--resume-from", type=int, metavar="RUN_ID", help="Resume from run ID")
-    resume_group.add_argument("--resume-failed-only", action="store_true", help="Re-run only failed jobs")
+    resume_group.add_argument("--resume-from", type=int, metavar="RUN_ID", help="Resume execution from a previous run ID")
+    resume_group.add_argument("--resume-failed-only", action="store_true", help="When resuming, only re-run jobs that failed (skip successful ones)")
 
     if len(sys.argv) == 1:
         parser.print_help(sys.stderr)
@@ -192,8 +194,22 @@ Notes:
         sys.exit(0)
 
     # Load config file and set log dir BEFORE init_db or JobExecutioner
-    with open(args.config, 'r') as f:
-        config_data = json.load(f)
+    try:
+        with open(args.config, 'r') as f:
+            config_data = json.load(f)
+    except FileNotFoundError:
+        print(f"Error: Configuration file '{args.config}' not found.")
+        print(f"Please check the file path or create the configuration file.")
+        print(f"Use --sample-config to see an example configuration.")
+        sys.exit(1)
+    except json.JSONDecodeError as e:
+        print(f"Error: Invalid JSON in configuration file '{args.config}'.")
+        print(f"JSON error: {e}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error reading configuration file '{args.config}': {e}")
+        sys.exit(1)
+        
     if "log_dir" in config_data:
         Config.set_log_dir(config_data["log_dir"])
     else:
