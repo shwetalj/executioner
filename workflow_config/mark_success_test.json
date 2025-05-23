@@ -1,0 +1,52 @@
+{
+    "application_name": "mark_success_demo",
+    "email_on_success": false,
+    "email_on_failure": false,
+    "parallel": false,
+    "env_variables": {
+        "TEST_MODE": "true"
+    },
+    "jobs": [
+        {
+            "id": "extract_data",
+            "description": "Extract data from source",
+            "command": "echo 'Extracting data...' && sleep 1 && echo 'Data extracted successfully'",
+            "timeout": 10
+        },
+        {
+            "id": "transform_data",
+            "description": "Transform data (this will fail)",
+            "command": "echo 'Transforming data...' && sleep 1 && echo 'ERROR: Transform failed!' && exit 1",
+            "dependencies": ["extract_data"],
+            "timeout": 10
+        },
+        {
+            "id": "validate_data",
+            "description": "Validate transformed data",
+            "command": "echo 'Validating data...' && sleep 1 && echo 'Validation complete'",
+            "dependencies": ["transform_data"],
+            "timeout": 10
+        },
+        {
+            "id": "load_to_warehouse",
+            "description": "Load data to data warehouse",
+            "command": "echo 'Loading to warehouse...' && sleep 1 && echo 'Data loaded successfully'",
+            "dependencies": ["validate_data"],
+            "timeout": 10
+        },
+        {
+            "id": "generate_report",
+            "description": "Generate summary report",
+            "command": "echo 'Generating report...' && sleep 1 && echo 'Report generated'",
+            "dependencies": ["load_to_warehouse"],
+            "timeout": 10
+        },
+        {
+            "id": "send_notifications",
+            "description": "Send completion notifications",
+            "command": "echo 'Sending notifications...' && echo 'Notifications sent'",
+            "dependencies": ["generate_report"],
+            "timeout": 10
+        }
+    ]
+}

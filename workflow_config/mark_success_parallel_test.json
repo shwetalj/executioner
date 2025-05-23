@@ -1,0 +1,60 @@
+{
+    "application_name": "parallel_mark_success_demo",
+    "email_on_success": false,
+    "email_on_failure": false,
+    "parallel": true,
+    "max_workers": 4,
+    "env_variables": {
+        "TEST_MODE": "true"
+    },
+    "jobs": [
+        {
+            "id": "fetch_data",
+            "description": "Fetch raw data",
+            "command": "echo 'Fetching data from API...' && sleep 2 && echo 'Data fetched'",
+            "timeout": 10
+        },
+        {
+            "id": "process_branch_a",
+            "description": "Process data branch A",
+            "command": "echo 'Processing branch A...' && sleep 2 && echo 'Branch A complete'",
+            "dependencies": ["fetch_data"],
+            "timeout": 10
+        },
+        {
+            "id": "process_branch_b",
+            "description": "Process data branch B (will fail)",
+            "command": "echo 'Processing branch B...' && sleep 1 && echo 'ERROR: Branch B failed!' && exit 1",
+            "dependencies": ["fetch_data"],
+            "timeout": 10
+        },
+        {
+            "id": "process_branch_c",
+            "description": "Process data branch C (will timeout)",
+            "command": "echo 'Processing branch C...' && sleep 15",
+            "dependencies": ["fetch_data"],
+            "timeout": 5
+        },
+        {
+            "id": "merge_results",
+            "description": "Merge results from all branches",
+            "command": "echo 'Merging results...' && sleep 1 && echo 'Results merged'",
+            "dependencies": ["process_branch_a", "process_branch_b", "process_branch_c"],
+            "timeout": 10
+        },
+        {
+            "id": "final_validation",
+            "description": "Final validation of merged results",
+            "command": "echo 'Running final validation...' && sleep 1 && echo 'Validation passed'",
+            "dependencies": ["merge_results"],
+            "timeout": 10
+        },
+        {
+            "id": "publish_results",
+            "description": "Publish final results",
+            "command": "echo 'Publishing results...' && echo 'Results published successfully'",
+            "dependencies": ["final_validation"],
+            "timeout": 10
+        }
+    ]
+}

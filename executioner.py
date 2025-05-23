@@ -42,6 +42,7 @@ from db.sqlite_backend import db_connection, init_db
 from config.validator import validate_config
 from jobs.executioner import JobExecutioner
 from jobs.env_utils import parse_env_vars, substitute_env_vars_in_obj
+from jobs.logger_factory import setup_logging
 
 SAMPLE_CONFIG = """{
     "application_name": "data_pipeline",
@@ -154,6 +155,16 @@ Notes:
     parser.add_argument("--skip", nargs='+', metavar="JOB_ID", help="Skip specified job IDs during execution")
     parser.add_argument("--env", action='append', help="Set environment variables (KEY=value or KEY1=val1,KEY2=val2)")
     parser.add_argument("--sample-config", action="store_true", help="Display a sample configuration file and exit")
+    parser.add_argument("--list-runs", nargs='?', const=True, metavar="APP_NAME", 
+                        help="List recent execution history (optionally filtered by app name) and exit")
+    parser.add_argument("--mark-success", action="store_true", 
+                        help="Mark specific jobs as successful in a previous run (use with -r and -j)")
+    parser.add_argument("--show-run", type=int, metavar="RUN_ID",
+                        help="Show detailed job status for a specific run ID")
+    parser.add_argument("-r", "--run-id", type=int, metavar="RUN_ID",
+                        help="Run ID for --mark-success operation")
+    parser.add_argument("-j", "--jobs", metavar="JOB_IDS",
+                        help="Comma-separated job IDs for --mark-success operation")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging (most detailed output)")
     parser.add_argument("--verbose", action="store_true", help="Enable verbose logging (INFO level messages)")
     parser.add_argument("--visible", action="store_true", help="Display all environment variables for each job before execution")
@@ -191,6 +202,238 @@ Notes:
         print(SAMPLE_CONFIG)
         print("-" * 80)
         print("Copy and modify as needed for your own pipeline.")
+        sys.exit(0)
+    
+    # Handle --list-runs flag
+    if args.list_runs is not None:  # Will be True or a string (app name) when specified
+        # Initialize database before querying
+        Config.set_log_dir(Path.cwd() / "logs")
+        ensure_log_dir()
+        init_db(verbose=args.verbose)
+        from jobs.job_history_manager import JobHistoryManager
+        
+        # Create a temporary job history manager just for querying
+        temp_logger = setup_logging("executioner", "query")
+        job_history = JobHistoryManager({}, None, None, temp_logger)
+        
+        # Get recent runs, optionally filtered by app name
+        app_filter = args.list_runs if isinstance(args.list_runs, str) else None
+        recent_runs = job_history.get_recent_runs(limit=20, app_name=app_filter)
+        
+        if not recent_runs:
+            if app_filter:
+                print(f"\nNo execution history found for application '{app_filter}'.")
+                print("Use --list-runs without an argument to see all runs.")
+            else:
+                print("\nNo execution history found.")
+                print("Run executioner with a config file to create execution history.")
+            sys.exit(0)
+        
+        # Display the runs
+        if app_filter:
+            print(f"\nRecent Execution History for '{app_filter}':")
+        else:
+            print("\nRecent Execution History:")
+        print("=" * 100)
+        print(f"{'Run ID':>7} | {'Application':20} | {'Status':10} | {'Start Time':19} | {'Duration':>8} | {'Jobs':>12}")
+        print("-" * 100)
+        
+        for run in recent_runs:
+            run_id = run['run_id']
+            app_name = run['application_name'][:20]
+            status = run['status']
+            start_time = run['start_time'] or 'N/A'
+            duration = run['duration'] or 'N/A'
+            job_summary = run['job_summary']
+            
+            # Color code status (only if terminal supports it)
+            if sys.stdout.isatty() and os.environ.get('TERM') != 'dumb':
+                if status == 'SUCCESS':
+                    status_display = f"\033[32m{status:10}\033[0m"  # Green
+                elif status in ['FAILED', 'ERROR']:
+                    status_display = f"\033[31m{status:10}\033[0m"  # Red
+                else:
+                    status_display = f"\033[33m{status:10}\033[0m"  # Yellow
+            else:
+                status_display = f"{status:10}"
+            
+            print(f"{run_id:>7} | {app_name:20} | {status_display} | {start_time:19} | {duration:>8} | {job_summary:>12}")
+        
+        print("\nTo resume a failed run: executioner.py -c <config> --resume-from <RUN_ID>")
+        print("To resume only failed jobs: executioner.py -c <config> --resume-from <RUN_ID> --resume-failed-only")
+        sys.exit(0)
+    
+    # Handle --show-run flag
+    if args.show_run:
+        # Initialize database
+        Config.set_log_dir(Path.cwd() / "logs")
+        ensure_log_dir()
+        init_db(verbose=args.verbose)
+        from jobs.job_history_manager import JobHistoryManager
+        
+        # Create job history manager
+        temp_logger = setup_logging("executioner", "show-run")
+        job_history = JobHistoryManager({}, None, None, temp_logger)
+        
+        # Get run details
+        run_details = job_history.get_run_details(args.show_run)
+        
+        if not run_details:
+            print(f"\nError: Run ID {args.show_run} not found.")
+            print("Use --list-runs to see available runs.")
+            sys.exit(1)
+        
+        # Display run header
+        run_info = run_details['run_info']
+        print(f"\nRun Details for ID {args.show_run}:")
+        print("=" * 80)
+        print(f"Application: {run_info['application_name']}")
+        print(f"Status: {run_info['status']}")
+        print(f"Start Time: {run_info['start_time']}")
+        print(f"End Time: {run_info['end_time']}")
+        print(f"Duration: {run_info['duration']}")
+        print(f"Total Jobs: {run_info['total_jobs']}")
+        
+        # Display job details
+        print(f"\nJob Status Details:")
+        print("-" * 80)
+        
+        jobs = run_details['jobs']
+        
+        # Group jobs by status
+        successful_jobs = [j for j in jobs if j['status'] == 'SUCCESS']
+        failed_jobs = [j for j in jobs if j['status'] in ['FAILED', 'ERROR', 'TIMEOUT']]
+        skipped_jobs = [j for j in jobs if j['status'] == 'SKIPPED']
+        other_jobs = [j for j in jobs if j['status'] not in ['SUCCESS', 'FAILED', 'ERROR', 'TIMEOUT', 'SKIPPED']]
+        
+        # Display successful jobs
+        if successful_jobs:
+            print(f"\n✓ Successful Jobs ({len(successful_jobs)}):")
+            for job in successful_jobs:
+                print(f"  {job['id']:30} - {job['description']}")
+        
+        # Display failed jobs with details
+        if failed_jobs:
+            print(f"\n✗ Failed Jobs ({len(failed_jobs)}):")
+            for job in failed_jobs:
+                status_detail = f"[{job['status']}]"
+                print(f"  {job['id']:30} - {job['description']} {status_detail}")
+                if job['command']:
+                    print(f"    Command: {job['command'][:60]}{'...' if len(job['command']) > 60 else ''}")
+                print(f"    Time: {job['last_run']}")
+        
+        # Display skipped jobs
+        if skipped_jobs:
+            print(f"\n- Skipped Jobs ({len(skipped_jobs)}):")
+            for job in skipped_jobs:
+                print(f"  {job['id']:30} - {job['description']}")
+        
+        # Display other status jobs
+        if other_jobs:
+            print(f"\n? Other Status Jobs ({len(other_jobs)}):")
+            for job in other_jobs:
+                print(f"  {job['id']:30} - {job['description']} [{job['status']}]")
+        
+        # Display resume instructions if there are failed jobs
+        if failed_jobs or skipped_jobs:
+            print(f"\nResume Options:")
+            print("-" * 80)
+            print(f"To resume all incomplete jobs:")
+            print(f"  executioner.py -c <config> --resume-from {args.show_run}")
+            print(f"\nTo retry only failed jobs:")
+            print(f"  executioner.py -c <config> --resume-from {args.show_run} --resume-failed-only")
+            
+            if failed_jobs:
+                failed_job_ids = ','.join([j['id'] for j in failed_jobs])
+                print(f"\nTo mark failed jobs as successful:")
+                print(f"  executioner.py --mark-success -r {args.show_run} -j {failed_job_ids}")
+        
+        # Show log file locations
+        print(f"\nLog Files:")
+        print("-" * 80)
+        print(f"Main log: ./logs/executioner.{run_info['application_name']}.run-{args.show_run}.log")
+        for job in failed_jobs[:3]:  # Show first 3 failed job logs
+            print(f"Job log:  ./logs/executioner.{run_info['application_name']}.job-{job['id']}.run-{args.show_run}.log")
+        if len(failed_jobs) > 3:
+            print(f"... and {len(failed_jobs) - 3} more failed job logs")
+        
+        sys.exit(0)
+    
+    # Handle --mark-success flag
+    if args.mark_success:
+        if not args.run_id or not args.jobs:
+            print("Error: --mark-success requires both -r RUN_ID and -j JOB_IDS")
+            print("Example: executioner.py --mark-success -r 249 -j job1,job2")
+            sys.exit(1)
+        
+        # Initialize database
+        Config.set_log_dir(Path.cwd() / "logs")
+        ensure_log_dir()
+        init_db(verbose=args.verbose)
+        from jobs.job_history_manager import JobHistoryManager
+        
+        # Parse job IDs
+        job_ids = [job.strip() for job in args.jobs.split(',')]
+        
+        # Create job history manager
+        temp_logger = setup_logging("executioner", "mark-success")
+        job_history = JobHistoryManager({}, None, None, temp_logger)
+        
+        # Get current status of these jobs
+        print(f"\nChecking status for run {args.run_id}...")
+        current_statuses = job_history.get_job_statuses_for_run(args.run_id, job_ids)
+        
+        if not current_statuses:
+            print(f"Error: No jobs found for run ID {args.run_id}")
+            print("Use --list-runs to see available runs")
+            sys.exit(1)
+        
+        # Display current status
+        print(f"\nCurrent status for run {args.run_id}:")
+        for job_id, status in current_statuses.items():
+            if job_id in job_ids:
+                print(f"  - {job_id}: {status}")
+            else:
+                print(f"  - {job_id}: NOT FOUND in run")
+        
+        # Check which jobs can be marked
+        jobs_to_mark = []
+        for job_id in job_ids:
+            if job_id not in current_statuses:
+                print(f"\nWarning: Job '{job_id}' not found in run {args.run_id}")
+            elif current_statuses[job_id] == 'SUCCESS':
+                print(f"\nInfo: Job '{job_id}' is already marked as SUCCESS")
+            elif current_statuses[job_id] in ['FAILED', 'ERROR', 'TIMEOUT']:
+                jobs_to_mark.append(job_id)
+            else:
+                print(f"\nWarning: Job '{job_id}' has status '{current_statuses[job_id]}' - can only mark FAILED/ERROR/TIMEOUT jobs")
+        
+        if not jobs_to_mark:
+            print("\nNo jobs to mark as successful.")
+            sys.exit(0)
+        
+        # Confirm action
+        print(f"\nWill mark the following jobs as SUCCESS:")
+        for job_id in jobs_to_mark:
+            print(f"  - {job_id}")
+        
+        response = input("\nAre you sure you want to mark these jobs as SUCCESS? [y/N]: ")
+        if response.lower() != 'y':
+            print("Operation cancelled.")
+            sys.exit(0)
+        
+        # Mark jobs as successful
+        success_count = job_history.mark_jobs_successful(args.run_id, jobs_to_mark)
+        
+        if success_count > 0:
+            print(f"\n✓ Successfully marked {success_count} job(s) as SUCCESS")
+            print(f"Note: Added comment 'Manually marked successful at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}'")
+            print(f"\nTo resume the run with dependent jobs:")
+            print(f"  executioner.py -c <config> --resume-from {args.run_id}")
+        else:
+            print("\nError: Failed to update job status")
+            sys.exit(1)
+        
         sys.exit(0)
 
     # Load config file and set log dir BEFORE init_db or JobExecutioner

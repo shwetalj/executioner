@@ -24,17 +24,17 @@ jobs/
 - Better code reusability
 - Reduced complexity
 
-### 2. Add Comprehensive Type Hints
+### 2. Add Comprehensive Type Hints (Python 3.6 Compatible)
 **Current Issue**: Inconsistent use of type annotations makes code harder to understand and maintain.
 
-**Recommended Approach**:
+**Recommended Approach** (Python 3.6 compatible):
 ```python
 # Before
 def run_job(self, job_id, dry_run=False, return_reason=False):
     pass
 
 # After
-from typing import Tuple, Optional, Dict, List, Any
+from typing import Tuple, Optional, Dict, List, Any, Union
 
 def run_job(
     self, 
@@ -43,6 +43,30 @@ def run_job(
     return_reason: bool = False
 ) -> Tuple[bool, Optional[str]]:
     pass
+
+# Python 3.6 requirements:
+# - Import from typing module (not built-ins)
+# - Use Union[X, Y] instead of X | Y
+# - Use List[str] instead of list[str]
+# - Use Dict[str, Any] instead of dict[str, Any]
+```
+
+**Python 3.6 Type Hint Examples**:
+```python
+from typing import List, Dict, Optional, Union, Callable, Any
+
+# Collections must use typing module
+jobs: List[str] = []
+config: Dict[str, Any] = {}
+
+# Optional is shorthand for Union[X, None]
+error_msg: Optional[str] = None
+
+# Union for multiple types
+timeout: Union[int, float] = 30
+
+# Callable for functions
+callback: Callable[[str], bool]
 ```
 
 **Benefits**:

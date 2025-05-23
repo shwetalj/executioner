@@ -1,0 +1,30 @@
+{
+    "application_name": "simple_mark_test",
+    "email_on_success": false,
+    "email_on_failure": false,
+    "env_variables": {
+        "TEST_MODE": "true"
+    },
+    "jobs": [
+        {
+            "id": "step1",
+            "description": "First step - always succeeds",
+            "command": "echo 'Step 1 complete'",
+            "timeout": 5
+        },
+        {
+            "id": "step2",
+            "description": "Second step - will fail",
+            "command": "echo 'Step 2 failed!' && exit 1",
+            "dependencies": ["step1"],
+            "timeout": 5
+        },
+        {
+            "id": "step3",
+            "description": "Third step - depends on step2",
+            "command": "echo 'Step 3 complete'",
+            "dependencies": ["step2"],
+            "timeout": 5
+        }
+    ]
+}
