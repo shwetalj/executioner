@@ -598,7 +598,7 @@ class JobExecutioner:
         print(f"{Config.COLOR_CYAN}{'EXECUTION SUMMARY':^40}{Config.COLOR_RESET}")
         print(f"{divider}")
         print(f"{Config.COLOR_CYAN}Application:{Config.COLOR_RESET} {self.application_name}")
-        print(f"{Config.COLOR_CYAN}Run ID:{Config.COLOR_RESET} {self.run_id}")
+        print(f"{Config.COLOR_CYAN}Run ID:{Config.COLOR_RESET} {Config.COLOR_YELLOW}{self.run_id}{Config.COLOR_RESET}")
         print(f"{Config.COLOR_CYAN}Status:{Config.COLOR_RESET} {status_color}{status}{Config.COLOR_RESET}")
         print(f"{Config.COLOR_CYAN}Start Time:{Config.COLOR_RESET} {self.start_time.strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"{Config.COLOR_CYAN}End Time:{Config.COLOR_RESET} {end_date}")
@@ -633,6 +633,36 @@ class JobExecutioner:
                     print(f"  - {job_id}: {desc}\n      Skipped (failed dependencies: {', '.join(failed_unmet)}; other unmet: {', '.join([d for d in unmet if d not in failed_unmet])})")
                 else:
                     print(f"  - {job_id}: {desc}\n      Skipped (unmet dependencies: {', '.join(unmet)})")
+        
+        # Add resume instructions if run failed
+        if self.exit_code != 0 and (failed_job_order or skipped_due_to_deps):
+            print(f"\n{Config.COLOR_CYAN}RESUME OPTIONS:{Config.COLOR_RESET}")
+            print(f"{Config.COLOR_CYAN}{'='*len('RESUME OPTIONS:')}{Config.COLOR_RESET}")
+            
+            print(f"To resume this run (all incomplete jobs):")
+            print(f"  {Config.COLOR_BLUE}executioner.py -c <config> --resume-from {self.run_id}{Config.COLOR_RESET}")
+            
+            if failed_job_order:
+                print(f"\nTo retry only failed jobs:")
+                print(f"  {Config.COLOR_BLUE}executioner.py -c <config> --resume-from {self.run_id} --resume-failed-only{Config.COLOR_RESET}")
+                
+                # Suggest mark-success for manual fixes
+                failed_ids = ','.join(failed_job_order)
+                print(f"\nIf you manually fixed and ran any failed jobs:")
+                print(f"  {Config.COLOR_BLUE}executioner.py --mark-success -r {self.run_id} -j <job_id>{Config.COLOR_RESET}")
+                print(f"  Example: executioner.py --mark-success -r {self.run_id} -j {failed_job_order[0]}")
+            
+            print(f"\nTo see detailed job status:")
+            print(f"  {Config.COLOR_BLUE}executioner.py --show-run {self.run_id}{Config.COLOR_RESET}")
+        elif self.exit_code == 0:
+            # For successful runs, just show how to view details
+            print(f"\n{Config.COLOR_CYAN}RUN INFORMATION:{Config.COLOR_RESET}")
+            print(f"{Config.COLOR_CYAN}{'='*len('RUN INFORMATION:')}{Config.COLOR_RESET}")
+            print(f"To view detailed job status for this run:")
+            print(f"  {Config.COLOR_BLUE}executioner.py --show-run {self.run_id}{Config.COLOR_RESET}")
+            print(f"\nTo list all recent runs:")
+            print(f"  {Config.COLOR_BLUE}executioner.py --list-runs{Config.COLOR_RESET}")
+        
         print(f"{divider}")
         print("\n")
         return self.exit_code
