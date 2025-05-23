@@ -244,8 +244,15 @@ class JobRunner(JobStatusMixin):
             self.mark_failed(self.job_id, "ERROR")
             return "ERROR"
         finally:
+            # Ensure thread cleanup
+            stop_reading.set()
+            if reader_thread.is_alive():
+                reader_thread.join(timeout=1)
             if process and process.stdout:
-                process.stdout.close()
+                try:
+                    process.stdout.close()
+                except Exception:
+                    pass  # Best effort
 
     def _run_checks(self, checks, job_logger, phase="pre"):
         for check in checks:

@@ -23,8 +23,11 @@ def check_no_ora_errors(log_file):
                     if "ORA-" in line:
                         logger.error(f"[DEBUG] check_no_ora_errors: Found ORA- error in file: {file_path}")
                         return False
+        except IOError as e:
+            logger.error(f"[DEBUG] check_no_ora_errors: IO error reading file {file_path}: {e}")
+            return False
         except Exception as e:
-            logger.error(f"[DEBUG] check_no_ora_errors: Exception opening file {file_path}: {e}")
+            logger.error(f"[DEBUG] check_no_ora_errors: Unexpected error reading file {file_path}: {e}")
             return False
     logger.debug(f"[DEBUG] check_no_ora_errors: No ORA- errors found in any matched files.")
     return True
@@ -37,7 +40,12 @@ def check_no_ora_or_sp2_errors(log_file):
                 if "ORA-" in line or "SP2-" in line:
                     return False
         return True
-    except Exception:
+    except IOError:
+        # File doesn't exist or can't be read
+        return False
+    except Exception as e:
+        logger = logging.getLogger("check_no_ora_or_sp2_errors")
+        logger.error(f"Unexpected error reading file {log_file}: {e}")
         return False 
 
 CHECK_REGISTRY = {

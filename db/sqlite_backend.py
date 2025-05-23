@@ -168,8 +168,8 @@ def init_db(verbose=False, logger=None):
                                                 ("FAILED", error_msg, migration_id)
                                             )
                                             conn.commit()
-                                        except:
-                                            pass
+                                        except sqlite3.Error:
+                                            pass  # Best effort - already handling the main error
                                     raise
                         if data_migration:
                             data_migration(conn, cursor)
@@ -196,8 +196,8 @@ def init_db(verbose=False, logger=None):
                             ("FAILED", str(e), migration_id)
                         )
                         conn.commit()
-                    except:
-                        pass
+                    except sqlite3.Error:
+                        pass  # Best effort - already handling the main error
                 raise
             conn.commit()
             cursor.execute("SELECT MAX(version) FROM schema_version")
@@ -212,7 +212,7 @@ def init_db(verbose=False, logger=None):
         try:
             if 'conn' in locals() and conn:
                 conn.rollback()
-        except:
-            pass
+        except Exception:
+            pass  # Best effort rollback attempt
         logger.error(f"Database initialization error: {e}")
         sys.exit(1) 

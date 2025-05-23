@@ -66,6 +66,17 @@ class JobHistoryManager:
             conn.commit()
         self.job_status_batch.clear()
 
+    # Define allowed columns to prevent SQL injection
+    ALLOWED_COLUMNS = {
+        'retry_history': ('TEXT', ''),
+        'last_exit_code': ('INTEGER', ''),
+        'retry_count': ('INTEGER', 'DEFAULT 0'),
+        'last_error': ('TEXT', ''),
+        'duration_seconds': ('REAL', ''),
+        'memory_usage_mb': ('REAL', ''),
+        'cpu_usage_percent': ('REAL', '')
+    }
+
     @handle_db_errors(lambda self: self.logger)
     def update_retry_history(self, job_id, retry_history, retry_count, status, reason=None):
         with db_connection(self.logger) as conn:
@@ -74,20 +85,26 @@ class JobHistoryManager:
             cursor.execute("PRAGMA table_info(job_history)")
             columns = [col[1] for col in cursor.fetchall()]
             columns_to_add = []
-            if 'retry_history' not in columns:
-                columns_to_add.append(("retry_history", "TEXT"))
-            if 'last_exit_code' not in columns:
-                columns_to_add.append(("last_exit_code", "INTEGER"))
-            if 'retry_count' not in columns:
-                columns_to_add.append(("retry_count", "INTEGER", "DEFAULT 0"))
-            if 'last_error' not in columns:
-                columns_to_add.append(("last_error", "TEXT"))
+            
+            # Check which allowed columns need to be added
+            for col_name, (col_type, col_constraint) in self.ALLOWED_COLUMNS.items():
+                if col_name in ['retry_history', 'last_exit_code', 'retry_count', 'last_error']:
+                    if col_name not in columns:
+                        columns_to_add.append((col_name, col_type, col_constraint))
+            
             if columns_to_add:
-                for col_info in columns_to_add:
-                    col_name = col_info[0]
-                    col_type = col_info[1]
-                    col_constraint = col_info[2] if len(col_info) > 2 else ""
-                    alter_sql = f"ALTER TABLE job_history ADD COLUMN {col_name} {col_type} {col_constraint}".strip()
+                for col_name, col_type, col_constraint in columns_to_add:
+                    # Validate column name and type against whitelist
+                    if col_name not in self.ALLOWED_COLUMNS:
+                        self.logger.error(f"Attempted to add non-whitelisted column: {col_name}")
+                        continue
+                    
+                    # Build SQL with validated components
+                    if col_constraint:
+                        alter_sql = f"ALTER TABLE job_history ADD COLUMN {col_name} {col_type} {col_constraint}"
+                    else:
+                        alter_sql = f"ALTER TABLE job_history ADD COLUMN {col_name} {col_type}"
+                    
                     try:
                         cursor.execute(alter_sql)
                         self.logger.info(f"Added missing column to job_history: {col_name} {col_type}")
@@ -148,13 +165,18 @@ class JobHistoryManager:
             cursor.execute("PRAGMA table_info(job_history)")
             columns = [col[1] for col in cursor.fetchall()]
             if 'last_exit_code' not in columns:
-                try:
-                    cursor.execute("ALTER TABLE job_history ADD COLUMN last_exit_code INTEGER")
-                    conn.commit()
-                    self.logger.info("Added missing column to job_history: last_exit_code INTEGER")
-                except sqlite3.OperationalError as e:
-                    if "duplicate column name" not in str(e):
-                        self.logger.warning(f"Could not add last_exit_code column: {e}")
+                # Validate column name against whitelist
+                if 'last_exit_code' in self.ALLOWED_COLUMNS:
+                    col_type, col_constraint = self.ALLOWED_COLUMNS['last_exit_code']
+                    try:
+                        cursor.execute("ALTER TABLE job_history ADD COLUMN last_exit_code INTEGER")
+                        conn.commit()
+                        self.logger.info("Added missing column to job_history: last_exit_code INTEGER")
+                    except sqlite3.OperationalError as e:
+                        if "duplicate column name" not in str(e):
+                            self.logger.warning(f"Could not add last_exit_code column: {e}")
+                else:
+                    self.logger.error("Attempted to add non-whitelisted column: last_exit_code")
                 return None
             try:
                 cursor.execute(

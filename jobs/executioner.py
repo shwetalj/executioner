@@ -208,7 +208,7 @@ class JobExecutioner:
         stop_event = threading.Event()
         process_complete = threading.Event()
         try:
-            is_safe, reason = validate_command(command, job_id, job_logger)
+            is_safe, reason = validate_command(command, job_id, job_logger, self.config)
             security_policy = self.config.get("security_policy", "warn")
             if not is_safe:
                 error_msg = f"Command execution blocked by security policy: {reason}"
