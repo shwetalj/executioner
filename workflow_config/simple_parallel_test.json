@@ -1,0 +1,19 @@
+{
+    "application_name": "simple_parallel_test",
+    "parallel": true,
+    "max_workers": 2,
+    "email_on_success": false,
+    "email_on_failure": false,
+    "jobs": [
+        {
+            "id": "job1",
+            "description": "Simple job 1",
+            "command": "echo 'Job 1 running'"
+        },
+        {
+            "id": "job2", 
+            "description": "Simple job 2",
+            "command": "echo 'Job 2 running'"
+        }
+    ]
+}

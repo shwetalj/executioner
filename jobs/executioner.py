@@ -750,9 +750,11 @@ class JobExecutioner:
             for job_id in just_completed_jobs:
                 if not self.interrupted:
                     self._queue_dependent_jobs(job_id)
-            available_worker_slots = self.max_workers - len(pending_futures)
             jobs_queued = 0
-            while available_worker_slots > 0 and not self.job_queue.empty() and not self.interrupted:
+            while not self.job_queue.empty() and not self.interrupted:
+                available_worker_slots = self.max_workers - len(pending_futures)
+                if available_worker_slots <= 0:
+                    break
                 try:
                     job_id = self.job_queue.get(timeout=0.1)
                 except Empty:
@@ -783,13 +785,13 @@ class JobExecutioner:
                     self.interrupted = True
                     break
                 if should_submit:
-                    future = self.executor.submit(self._execute_job, job_id)
                     with self.lock:
+                        # Submit the job
+                        future = self.executor.submit(self._execute_job, job_id)
                         pending_futures.add(future)
                         self.future_to_job_id[future] = job_id
                         self.logger.debug(f"Submitted job {job_id}")
-                    available_worker_slots -= 1
-                    jobs_queued += 1
+                        jobs_queued += 1
             if not completed_futures and not jobs_queued:
                 with self.job_completed_condition:
                     self.job_completed_condition.wait(timeout=1.0)

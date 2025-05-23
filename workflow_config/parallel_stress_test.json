@@ -1,0 +1,86 @@
+{
+    "application_name": "parallel_stress_test",
+    "email_address": "test@example.com",
+    "email_on_success": false,
+    "email_on_failure": false,
+    "parallel": true,
+    "max_workers": 10,
+    "env_variables": {
+        "APP_ENV": "test",
+        "LOG_LEVEL": "debug"
+    },
+    "jobs": [
+        {
+            "id": "job_1",
+            "description": "Job 1",
+            "command": "echo 'Job 1' && sleep 0.05",
+            "timeout": 2
+        },
+        {
+            "id": "job_2",
+            "description": "Job 2",
+            "command": "echo 'Job 2' && sleep 0.05",
+            "timeout": 2
+        },
+        {
+            "id": "job_3",
+            "description": "Job 3",
+            "command": "echo 'Job 3' && sleep 0.05",
+            "timeout": 2
+        },
+        {
+            "id": "job_4",
+            "description": "Job 4",
+            "command": "echo 'Job 4' && sleep 0.05",
+            "timeout": 2
+        },
+        {
+            "id": "job_5",
+            "description": "Job 5",
+            "command": "echo 'Job 5' && sleep 0.05",
+            "timeout": 2
+        },
+        {
+            "id": "mid_1",
+            "description": "Mid layer 1",
+            "command": "echo 'Mid 1'",
+            "dependencies": ["job_1", "job_2"],
+            "timeout": 2
+        },
+        {
+            "id": "mid_2",
+            "description": "Mid layer 2",
+            "command": "echo 'Mid 2'",
+            "dependencies": ["job_3", "job_4"],
+            "timeout": 2
+        },
+        {
+            "id": "mid_3",
+            "description": "Mid layer 3",
+            "command": "echo 'Mid 3'",
+            "dependencies": ["job_5"],
+            "timeout": 2
+        },
+        {
+            "id": "final_1",
+            "description": "Final 1",
+            "command": "echo 'Final 1'",
+            "dependencies": ["mid_1", "mid_2"],
+            "timeout": 2
+        },
+        {
+            "id": "final_2",
+            "description": "Final 2",
+            "command": "echo 'Final 2'",
+            "dependencies": ["mid_2", "mid_3"],
+            "timeout": 2
+        },
+        {
+            "id": "ultimate",
+            "description": "Ultimate job",
+            "command": "echo 'All done!'",
+            "dependencies": ["final_1", "final_2"],
+            "timeout": 2
+        }
+    ]
+}

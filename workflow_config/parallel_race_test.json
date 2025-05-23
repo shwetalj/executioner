@@ -1,0 +1,73 @@
+{
+    "application_name": "parallel_race_test",
+    "email_address": "test@example.com",
+    "email_on_success": false,
+    "email_on_failure": false,
+    "parallel": true,
+    "max_workers": 5,
+    "env_variables": {
+        "APP_ENV": "test",
+        "LOG_LEVEL": "debug"
+    },
+    "jobs": [
+        {
+            "id": "fast_job_1",
+            "description": "Fast job that completes quickly",
+            "command": "echo 'Fast job 1 starting' && sleep 0.1 && echo 'Fast job 1 done'",
+            "timeout": 5
+        },
+        {
+            "id": "fast_job_2",
+            "description": "Fast job that completes quickly",
+            "command": "echo 'Fast job 2 starting' && sleep 0.1 && echo 'Fast job 2 done'",
+            "timeout": 5
+        },
+        {
+            "id": "fast_job_3",
+            "description": "Fast job that completes quickly",
+            "command": "echo 'Fast job 3 starting' && sleep 0.1 && echo 'Fast job 3 done'",
+            "timeout": 5
+        },
+        {
+            "id": "dependent_on_all_fast",
+            "description": "Depends on all fast jobs",
+            "command": "echo 'Dependent job starting' && sleep 0.2 && echo 'Dependent job done'",
+            "dependencies": ["fast_job_1", "fast_job_2", "fast_job_3"],
+            "timeout": 5
+        },
+        {
+            "id": "chain_1",
+            "description": "First in chain",
+            "command": "echo 'Chain 1' && sleep 0.1",
+            "timeout": 5
+        },
+        {
+            "id": "chain_2",
+            "description": "Second in chain",
+            "command": "echo 'Chain 2' && sleep 0.1",
+            "dependencies": ["chain_1"],
+            "timeout": 5
+        },
+        {
+            "id": "chain_3",
+            "description": "Third in chain",
+            "command": "echo 'Chain 3' && sleep 0.1",
+            "dependencies": ["chain_2"],
+            "timeout": 5
+        },
+        {
+            "id": "chain_4",
+            "description": "Fourth in chain",
+            "command": "echo 'Chain 4' && sleep 0.1",
+            "dependencies": ["chain_3"],
+            "timeout": 5
+        },
+        {
+            "id": "convergence_point",
+            "description": "All chains converge here",
+            "command": "echo 'All chains converged'",
+            "dependencies": ["dependent_on_all_fast", "chain_4"],
+            "timeout": 5
+        }
+    ]
+}

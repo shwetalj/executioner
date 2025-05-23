@@ -1,0 +1,54 @@
+{
+    "application_name": "parallel_failure_race_test",
+    "email_address": "test@example.com",
+    "email_on_success": false,
+    "email_on_failure": false,
+    "parallel": true,
+    "max_workers": 4,
+    "continue_on_error": false,
+    "env_variables": {
+        "APP_ENV": "test",
+        "LOG_LEVEL": "debug"
+    },
+    "jobs": [
+        {
+            "id": "will_succeed_1",
+            "description": "This job will succeed",
+            "command": "echo 'Success 1' && exit 0",
+            "timeout": 2
+        },
+        {
+            "id": "will_fail_1",
+            "description": "This job will fail",
+            "command": "echo 'Failing 1' && exit 1",
+            "timeout": 2
+        },
+        {
+            "id": "will_succeed_2",
+            "description": "This job will succeed",
+            "command": "echo 'Success 2' && exit 0",
+            "timeout": 2
+        },
+        {
+            "id": "depends_on_failure",
+            "description": "Depends on a job that will fail",
+            "command": "echo 'Should not run'",
+            "dependencies": ["will_fail_1"],
+            "timeout": 2
+        },
+        {
+            "id": "depends_on_mixed",
+            "description": "Depends on both success and failure",
+            "command": "echo 'Should not run either'",
+            "dependencies": ["will_succeed_1", "will_fail_1"],
+            "timeout": 2
+        },
+        {
+            "id": "depends_on_success",
+            "description": "Depends only on successful jobs",
+            "command": "echo 'Should run'",
+            "dependencies": ["will_succeed_1", "will_succeed_2"],
+            "timeout": 2
+        }
+    ]
+}
