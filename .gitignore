@@ -7,3 +7,4 @@ logs
 DRY
 *backup
 config/jobs_history.db
+jobs*.pyc
