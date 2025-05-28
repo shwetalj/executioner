@@ -513,6 +513,9 @@ class JobExecutioner:
                 self._print_abort_summary("FAILED", reason="Missing dependencies detected", missing_deps=missing_dependencies)
                 return self.exit_code
         self.start_time = datetime.datetime.now()
+        # Create run summary entry
+        if not dry_run:
+            self.job_history.create_run_summary(self.run_id, self.application_name, self.start_time, len(self.jobs))
         print(f"{divider}")
         print(f"{Config.COLOR_CYAN}{f'STARTING EXECUTION Application {self.application_name} - RUN #{self.run_id}{dry_run_text}{parallel_text}':^90}{Config.COLOR_RESET}")
         print(f"{divider}")
@@ -581,6 +584,17 @@ class JobExecutioner:
             if not_completed:
                 self.logger.warning(f"The following jobs were not completed: {', '.join(not_completed)}")
                 self.exit_code = 1
+            
+            # Update run summary with final results
+            self.job_history.update_run_summary(
+                self.run_id, 
+                self.end_time, 
+                status,
+                len(self.completed_jobs),
+                len(self.failed_jobs),
+                len(self.skip_jobs),
+                self.exit_code
+            )
             if self._has_valid_email():
                 if len(self.failed_jobs) > 0 and self.email_on_failure:
                     self._send_notification(success=False)

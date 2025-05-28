@@ -141,7 +141,27 @@ def init_db(verbose=False, logger=None):
                         error_message TEXT
                     )
                     """
-                ], None, "DROP TABLE IF EXISTS migration_history;")
+                ], None, "DROP TABLE IF EXISTS migration_history;"),
+                (5, "Add run summary table", [
+                    """
+                    CREATE TABLE IF NOT EXISTS run_summary (
+                        run_id INTEGER PRIMARY KEY,
+                        application_name TEXT NOT NULL,
+                        start_time TIMESTAMP NOT NULL,
+                        end_time TIMESTAMP,
+                        status TEXT,
+                        total_jobs INTEGER DEFAULT 0,
+                        completed_jobs INTEGER DEFAULT 0,
+                        failed_jobs INTEGER DEFAULT 0,
+                        skipped_jobs INTEGER DEFAULT 0,
+                        exit_code INTEGER,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """,
+                    "CREATE INDEX IF NOT EXISTS idx_run_summary_app ON run_summary (application_name)",
+                    "CREATE INDEX IF NOT EXISTS idx_run_summary_status ON run_summary (status)",
+                    "CREATE INDEX IF NOT EXISTS idx_run_summary_start ON run_summary (start_time)"
+                ], None, "DROP TABLE IF EXISTS run_summary;")
             ]
             migration_id = None
             if current_version < len(migrations):

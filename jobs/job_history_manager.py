@@ -22,6 +22,31 @@ class JobHistoryManager:
             cursor.execute("SELECT MAX(CAST(run_id AS INTEGER)) FROM job_history")
             last_run_id = cursor.fetchone()[0]
             return (last_run_id + 1) if last_run_id is not None else 1
+    
+    @handle_db_errors(lambda self: self.logger)
+    def create_run_summary(self, run_id, application_name, start_time, total_jobs):
+        """Create a new run summary entry"""
+        with db_connection(self.logger) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO run_summary (run_id, application_name, start_time, status, total_jobs)
+                VALUES (?, ?, ?, 'RUNNING', ?)
+            """, (run_id, application_name, start_time.strftime('%Y-%m-%d %H:%M:%S'), total_jobs))
+            conn.commit()
+    
+    @handle_db_errors(lambda self: self.logger)
+    def update_run_summary(self, run_id, end_time, status, completed_jobs, failed_jobs, skipped_jobs, exit_code):
+        """Update run summary with final results"""
+        with db_connection(self.logger) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE run_summary 
+                SET end_time = ?, status = ?, completed_jobs = ?, 
+                    failed_jobs = ?, skipped_jobs = ?, exit_code = ?
+                WHERE run_id = ?
+            """, (end_time.strftime('%Y-%m-%d %H:%M:%S'), status, 
+                  completed_jobs, failed_jobs, skipped_jobs, exit_code, run_id))
+            conn.commit()
 
     @handle_db_errors(lambda self: self.logger)
     def get_previous_run_status(self, resume_run_id):
@@ -48,7 +73,89 @@ class JobHistoryManager:
         with db_connection(self.logger) as conn:
             cursor = conn.cursor()
             
-            # Get distinct runs with their summary info
+            # First check if run_summary table exists
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='run_summary'")
+            has_run_summary = cursor.fetchone() is not None
+            
+            if has_run_summary:
+                # Use run_summary table for accurate timing
+                if app_name:
+                    query = """
+                    SELECT 
+                        rs.run_id,
+                        rs.application_name,
+                        rs.start_time,
+                        rs.end_time,
+                        rs.status,
+                        rs.total_jobs,
+                        rs.completed_jobs as successful_jobs,
+                        rs.failed_jobs,
+                        rs.skipped_jobs
+                    FROM run_summary rs
+                    WHERE rs.application_name = ?
+                    ORDER BY rs.run_id DESC
+                    LIMIT ?
+                    """
+                    cursor.execute(query, (app_name, limit))
+                else:
+                    query = """
+                    SELECT 
+                        rs.run_id,
+                        rs.application_name,
+                        rs.start_time,
+                        rs.end_time,
+                        rs.status,
+                        rs.total_jobs,
+                        rs.completed_jobs as successful_jobs,
+                        rs.failed_jobs,
+                        rs.skipped_jobs
+                    FROM run_summary rs
+                    ORDER BY rs.run_id DESC
+                    LIMIT ?
+                    """
+                    cursor.execute(query, (limit,))
+                    
+                for row in cursor.fetchall():
+                    run_id, app_name, start_time, end_time, status, total_jobs, successful_jobs, failed_jobs, skipped_jobs = row
+                    
+                    # If this run isn't in run_summary but is in job_history, fall back to old method
+                    if not start_time:
+                        continue
+                        
+                    # Calculate duration if both times exist
+                    duration = 'N/A'
+                    if start_time and end_time:
+                        try:
+                            from datetime import datetime
+                            start_dt = datetime.fromisoformat(start_time.replace(' ', 'T'))
+                            end_dt = datetime.fromisoformat(end_time.replace(' ', 'T'))
+                            duration_td = end_dt - start_dt
+                            # Format duration as HH:MM:SS
+                            hours, remainder = divmod(int(duration_td.total_seconds()), 3600)
+                            minutes, seconds = divmod(remainder, 60)
+                            duration = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+                        except:
+                            duration = 'N/A'
+                    
+                    # Format job summary
+                    job_summary = f"{successful_jobs}/{total_jobs}"
+                    if failed_jobs > 0:
+                        job_summary += f" ({failed_jobs} failed)"
+                    
+                    runs.append({
+                        'run_id': run_id,
+                        'application_name': app_name or 'Unknown',
+                        'status': status,
+                        'start_time': start_time or 'N/A',
+                        'duration': duration,
+                        'job_summary': job_summary,
+                        'total_jobs': total_jobs,
+                        'successful_jobs': successful_jobs,
+                        'failed_jobs': failed_jobs,
+                        'skipped_jobs': skipped_jobs
+                    })
+            
+            # Also get runs from job_history that might not be in run_summary yet
             if app_name:
                 query = """
                 SELECT 
@@ -62,6 +169,7 @@ class JobHistoryManager:
                     COUNT(DISTINCT CASE WHEN jh.status = 'SKIPPED' THEN jh.id END) as skipped_jobs
                 FROM job_history jh
                 WHERE jh.application_name = ?
+                    AND jh.run_id NOT IN (SELECT run_id FROM run_summary)
                 GROUP BY jh.run_id, jh.application_name
                 ORDER BY jh.run_id DESC
                 LIMIT ?
@@ -78,7 +186,10 @@ class JobHistoryManager:
                     COUNT(DISTINCT CASE WHEN jh.status = 'SUCCESS' THEN jh.id END) as successful_jobs,
                     COUNT(DISTINCT CASE WHEN jh.status IN ('FAILED', 'ERROR', 'TIMEOUT') THEN jh.id END) as failed_jobs,
                     COUNT(DISTINCT CASE WHEN jh.status = 'SKIPPED' THEN jh.id END) as skipped_jobs
-                FROM job_history jh
+                FROM job_history jh"""
+                if has_run_summary:
+                    query += " WHERE jh.run_id NOT IN (SELECT run_id FROM run_summary)"
+                query += """
                 GROUP BY jh.run_id, jh.application_name
                 ORDER BY jh.run_id DESC
                 LIMIT ?
@@ -131,7 +242,9 @@ class JobHistoryManager:
                     'skipped_jobs': skipped_jobs
                 })
         
-        return runs
+        # Sort runs by run_id descending and limit to requested amount
+        runs.sort(key=lambda x: x['run_id'], reverse=True)
+        return runs[:limit]
     
     @handle_db_errors(lambda self: self.logger)
     def get_job_statuses_for_run(self, run_id, job_ids=None):
@@ -186,52 +299,79 @@ class JobHistoryManager:
         with db_connection(self.logger) as conn:
             cursor = conn.cursor()
             
-            # Get run summary info
-            query = """
-            SELECT 
-                application_name,
-                MIN(last_run) as start_time,
-                MAX(last_run) as end_time,
-                COUNT(DISTINCT id) as total_jobs,
-                COUNT(DISTINCT CASE WHEN status = 'SUCCESS' THEN id END) as successful_jobs,
-                COUNT(DISTINCT CASE WHEN status IN ('FAILED', 'ERROR', 'TIMEOUT') THEN id END) as failed_jobs,
-                COUNT(DISTINCT CASE WHEN status = 'SKIPPED' THEN id END) as skipped_jobs
-            FROM job_history
-            WHERE run_id = ?
-            GROUP BY application_name
-            """
+            # First try to get info from run_summary table
+            cursor.execute("""
+                SELECT application_name, start_time, end_time, status, 
+                       total_jobs, completed_jobs, failed_jobs, skipped_jobs
+                FROM run_summary
+                WHERE run_id = ?
+            """, (run_id,))
             
-            cursor.execute(query, (run_id,))
-            row = cursor.fetchone()
+            summary_row = cursor.fetchone()
             
-            if not row:
-                return None
-            
-            app_name, start_time, end_time, total_jobs, successful_jobs, failed_jobs, skipped_jobs = row
-            
-            # Determine overall status
-            if failed_jobs > 0:
-                status = 'FAILED'
-            elif successful_jobs == total_jobs:
-                status = 'SUCCESS'
-            elif successful_jobs > 0:
-                status = 'PARTIAL'
+            if summary_row:
+                # Use run_summary data
+                app_name, start_time, end_time, status, total_jobs, completed_jobs, failed_jobs, skipped_jobs = summary_row
+                
+                # Calculate duration
+                duration = 'N/A'
+                if start_time and end_time:
+                    try:
+                        from datetime import datetime
+                        start_dt = datetime.fromisoformat(start_time.replace(' ', 'T'))
+                        end_dt = datetime.fromisoformat(end_time.replace(' ', 'T'))
+                        duration_td = end_dt - start_dt
+                        duration = str(duration_td).split('.')[0]
+                    except:
+                        pass
             else:
-                status = 'PENDING'
-            
-            # Calculate duration
-            duration = 'N/A'
-            if start_time and end_time:
-                try:
-                    from datetime import datetime
-                    start_dt = datetime.fromisoformat(start_time.replace(' ', 'T'))
-                    end_dt = datetime.fromisoformat(end_time.replace(' ', 'T'))
-                    duration_td = end_dt - start_dt
-                    hours, remainder = divmod(int(duration_td.total_seconds()), 3600)
-                    minutes, seconds = divmod(remainder, 60)
-                    duration = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-                except:
-                    duration = 'N/A'
+                # Fallback to old method for backward compatibility
+                query = """
+                SELECT 
+                    application_name,
+                    MIN(last_run) as start_time,
+                    MAX(last_run) as end_time,
+                    COUNT(DISTINCT id) as total_jobs,
+                    COUNT(DISTINCT CASE WHEN status = 'SUCCESS' THEN id END) as successful_jobs,
+                    COUNT(DISTINCT CASE WHEN status IN ('FAILED', 'ERROR', 'TIMEOUT') THEN id END) as failed_jobs,
+                    COUNT(DISTINCT CASE WHEN status = 'SKIPPED' THEN id END) as skipped_jobs
+                FROM job_history
+                WHERE run_id = ?
+                GROUP BY application_name
+                """
+                
+                cursor.execute(query, (run_id,))
+                row = cursor.fetchone()
+                
+                if not row:
+                    return None
+                
+                app_name, start_time, end_time, total_jobs, successful_jobs, failed_jobs, skipped_jobs = row
+                completed_jobs = successful_jobs
+                
+                # Determine overall status
+                if failed_jobs > 0:
+                    status = 'FAILED'
+                elif successful_jobs == total_jobs:
+                    status = 'SUCCESS'
+                elif successful_jobs > 0:
+                    status = 'PARTIAL'
+                else:
+                    status = 'PENDING'
+                
+                # Calculate duration (will likely be N/A for old data)
+                duration = 'N/A'
+                if start_time and end_time:
+                    try:
+                        from datetime import datetime
+                        start_dt = datetime.fromisoformat(start_time.replace(' ', 'T'))
+                        end_dt = datetime.fromisoformat(end_time.replace(' ', 'T'))
+                        duration_td = end_dt - start_dt
+                        hours, remainder = divmod(int(duration_td.total_seconds()), 3600)
+                        minutes, seconds = divmod(remainder, 60)
+                        duration = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+                    except:
+                        duration = 'N/A'
             
             run_info = {
                 'run_id': run_id,
@@ -241,7 +381,7 @@ class JobHistoryManager:
                 'end_time': end_time or 'N/A',
                 'duration': duration,
                 'total_jobs': total_jobs,
-                'successful_jobs': successful_jobs,
+                'successful_jobs': completed_jobs if summary_row else successful_jobs,
                 'failed_jobs': failed_jobs,
                 'skipped_jobs': skipped_jobs
             }
