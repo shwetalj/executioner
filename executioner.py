@@ -44,6 +44,24 @@ from jobs.executioner import JobExecutioner
 from jobs.env_utils import parse_env_vars, substitute_env_vars_in_obj
 from jobs.logger_factory import setup_logging
 
+def parse_skip_jobs(skip_list):
+    """Parse comma-separated job IDs. Supports both repeated and comma-separated formats."""
+    if not skip_list:
+        return []
+    job_ids = []
+    for skip_entry in skip_list:
+        # Support comma-separated job IDs in a single argument
+        ids = [id.strip() for id in skip_entry.split(',') if id.strip()]
+        job_ids.extend(ids)
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_ids = []
+    for job_id in job_ids:
+        if job_id not in seen:
+            seen.add(job_id)
+            unique_ids.append(job_id)
+    return unique_ids
+
 SAMPLE_CONFIG = """{
     "application_name": "data_pipeline",
     "default_timeout": 10800,
@@ -146,59 +164,99 @@ Configuration Options:
 
 def main():
     epilog_text = """
+Key Features:
+• Dependency-based job orchestration
+• Parallel and sequential execution modes
+• Comprehensive retry mechanisms with backoff
+• Environment variable management and isolation
+• Pre/post job validation checks
+• Resume capability for failed runs
+• Email notifications on success/failure
+• Detailed logging and execution history
+• Dry-run mode for validation
+• Security controls for command execution
+
+Configuration Features:
+• Environment variable interpolation: Use ${VAR} syntax in config
+• Shell environment isolation: Set 'inherit_shell_env' in config:
+  - true: inherit all (default)
+  - false: complete isolation
+  - "default": common system vars only
+  - ["PATH", "HOME"]: custom whitelist
+• Security: Set 'security_policy: strict' to block unsafe commands
+• Retry configuration with backoff, jitter, and exit code matching
+• Pre/post job checks for validation
+• Custom dependency plugins support
+
+Notes:
+• Default config file: jobs_config.json (if -c not specified)
+• Environment variable precedence: CLI > job-level > application-level
+• CLI env formats: --env KEY=VAL or --env KEY1=val1,KEY2=val2
+• Multiple --env arguments can be used: --env A=1 --env B=2
+• Logs stored in ./logs/ (or config 'log_dir') with rotation
+• Use --dry-run to validate config and see execution plan
+• See ENV_ISOLATION_DOCS.md for environment variable details
+
 Examples:
   %(prog)s -c jobs_config.json
   %(prog)s -c jobs_config.json --continue-on-error
   %(prog)s -c jobs_config.json --dry-run
-  %(prog)s -c jobs_config.json --skip job1 job2
-  %(prog)s -c jobs_config.json --env KEY1=value1 KEY2=value2
-  %(prog)s -c jobs_config.json --env DB=prod,LOG_LEVEL=debug
+  %(prog)s -c jobs_config.json --skip job1,job2,job3  # Comma-separated
+  %(prog)s -c jobs_config.json --skip job1 --skip job2  # Multiple --skip
+  %(prog)s -c jobs_config.json --env KEY1=value1,KEY2=value2  # Comma-separated
+  %(prog)s -c jobs_config.json --env DB=prod --env LOG_LEVEL=debug  # Multiple --env
   %(prog)s -c jobs_config.json --parallel --workers 4
   %(prog)s -c jobs_config.json --resume-from 123
   %(prog)s -c jobs_config.json --resume-from 123 --resume-failed-only
   %(prog)s --sample-config        # Shows sample configuration format
-
-Notes:
-- Default config file: jobs_config.json (if -c not specified)
-- Set 'allow_shell: false' in config to disable shell execution (more secure)
-- Use 'smtp_*' settings in config for email authentication
-- Environment variable precedence: CLI > job-level > application-level
-- CLI env formats: --env KEY=VAL or --env KEY1=VAL1,KEY2=VAL2
-- Logs are stored in ./logs/ directory with automatic rotation
-- Use --parallel in config or CLI for concurrent job execution
-- Use --dry-run to validate config and see execution plan
+  %(prog)s --list-runs           # Show recent execution history
+  %(prog)s --show-run 123        # Show detailed status for run 123
+  %(prog)s --mark-success -r 123 -j job1,job2  # Mark jobs as successful
 """
     parser = argparse.ArgumentParser(
         description="Executioner - A robust job execution engine with dependency management, parallel execution, and retry capabilities",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=epilog_text
     )
+    # Basic configuration
     parser.add_argument("-c", "--config", default="jobs_config.json", help="Path to job configuration file (default: jobs_config.json)")
-    parser.add_argument("--continue-on-error", action="store_true", help="Continue executing remaining jobs even if a job fails")
-    parser.add_argument("--dry-run", action="store_true", help="Show what would be executed without actually running jobs")
-    parser.add_argument("--skip", nargs='+', metavar="JOB_ID", help="Skip specified job IDs during execution")
-    parser.add_argument("--env", action='append', help="Set environment variables (KEY=value or KEY1=val1,KEY2=val2)")
     parser.add_argument("--sample-config", action="store_true", help="Display a sample configuration file and exit")
-    parser.add_argument("--list-runs", nargs='?', const=True, metavar="APP_NAME", 
-                        help="List recent execution history (optionally filtered by app name) and exit")
-    parser.add_argument("--mark-success", action="store_true", 
-                        help="Mark specific jobs as successful in a previous run (use with -r and -j)")
-    parser.add_argument("--show-run", type=int, metavar="RUN_ID",
-                        help="Show detailed job status for a specific run ID")
-    parser.add_argument("-r", "--run-id", type=int, metavar="RUN_ID",
-                        help="Run ID for --mark-success operation")
-    parser.add_argument("-j", "--jobs", metavar="JOB_IDS",
-                        help="Comma-separated job IDs for --mark-success operation")
-    parser.add_argument("--debug", action="store_true", help="Enable debug logging (most detailed output)")
-    parser.add_argument("--verbose", action="store_true", help="Enable verbose logging (INFO level messages)")
-    parser.add_argument("--visible", action="store_true", help="Display all environment variables for each job before execution")
-    parallel_group = parser.add_argument_group("Parallel execution options")
+    
+    # Execution control options
+    execution_group = parser.add_argument_group("Execution control")
+    execution_group.add_argument("--dry-run", action="store_true", help="Show what would be executed without actually running jobs")
+    execution_group.add_argument("--skip", action='append', metavar="JOB_IDS", help="Skip specified job IDs (comma-separated or multiple --skip)")
+    execution_group.add_argument("--env", action='append', help="Set environment variables (KEY=value or KEY1=val1,KEY2=val2)")
+    
+    # Failure handling options
+    failure_group = parser.add_argument_group("Failure handling")
+    failure_group.add_argument("--continue-on-error", action="store_true", help="Continue executing remaining jobs even if a job fails")
+    
+    # Parallel execution options
+    parallel_group = parser.add_argument_group("Parallel execution")
     parallel_group.add_argument("--parallel", action="store_true", help="Enable parallel job execution (overrides config setting)")
     parallel_group.add_argument("--workers", type=int, metavar="N", help="Number of parallel workers (default: from config or 1)")
     parallel_group.add_argument("--sequential", action="store_true", help="Force sequential execution even if config enables parallel")
-    resume_group = parser.add_argument_group("Resume options")
+    
+    # Resume and recovery options
+    resume_group = parser.add_argument_group("Resume and recovery")
     resume_group.add_argument("--resume-from", type=int, metavar="RUN_ID", help="Resume execution from a previous run ID")
     resume_group.add_argument("--resume-failed-only", action="store_true", help="When resuming, only re-run jobs that failed (skip successful ones)")
+    resume_group.add_argument("--mark-success", action="store_true", help="Mark specific jobs as successful in a previous run (use with -r and -j)")
+    resume_group.add_argument("-r", "--run-id", type=int, metavar="RUN_ID", help="Run ID for --mark-success operation")
+    resume_group.add_argument("-j", "--jobs", metavar="JOB_IDS", help="Comma-separated job IDs for --mark-success operation")
+    
+    # History and reporting options
+    history_group = parser.add_argument_group("History and reporting")
+    history_group.add_argument("--list-runs", nargs='?', const=True, metavar="APP_NAME", 
+                             help="List recent execution history (optionally filtered by app name) and exit")
+    history_group.add_argument("--show-run", type=int, metavar="RUN_ID", help="Show detailed job status for a specific run ID")
+    
+    # Logging and debugging options
+    logging_group = parser.add_argument_group("Logging and debugging")
+    logging_group.add_argument("--debug", action="store_true", help="Enable debug logging (most detailed output)")
+    logging_group.add_argument("--verbose", action="store_true", help="Enable verbose logging (INFO level messages)")
+    logging_group.add_argument("--visible", action="store_true", help="Display all environment variables for each job before execution")
 
     if len(sys.argv) == 1:
         parser.print_help(sys.stderr)
@@ -550,11 +608,14 @@ Notes:
             print("Error: Resume run ID must be a positive integer")
             sys.exit(1)
 
+    # Parse skip jobs if provided
+    skip_jobs = parse_skip_jobs(args.skip) if args.skip else []
+    
     try:
         code = executioner.run(
             continue_on_error=args.continue_on_error,
             dry_run=args.dry_run,
-            skip_jobs=args.skip,
+            skip_jobs=skip_jobs,
             resume_run_id=args.resume_from,
             resume_failed_only=args.resume_failed_only
         )
