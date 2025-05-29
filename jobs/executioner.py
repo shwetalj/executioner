@@ -690,7 +690,9 @@ class JobExecutioner:
             print(f"{Config.COLOR_CYAN}{'='*len('RUN INFORMATION:')}{Config.COLOR_RESET}")
             print(f"To view detailed job status for this run:")
             print(f"  {Config.COLOR_BLUE}executioner.py --show-run {self.run_id}{Config.COLOR_RESET}")
-            print(f"\nTo list all recent runs:")
+            print(f"\nTo list all recent runs for {self.application_name}:")
+            print(f"  {Config.COLOR_BLUE}executioner.py --list-runs {self.application_name}{Config.COLOR_RESET}")
+            print(f"\nTo list all recent runs (all applications):")
             print(f"  {Config.COLOR_BLUE}executioner.py --list-runs{Config.COLOR_RESET}")
         
         print(f"{divider}")
