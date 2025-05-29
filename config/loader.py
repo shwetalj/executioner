@@ -6,7 +6,7 @@ class Config:
     # Use current working directory for logs
     CWD = Path.cwd()
     LOG_DIR = None  # Set after config is loaded
-    DB_FILE = BASE_DIR / 'jobs_history.db'
+    DB_FILE = BASE_DIR.parent / 'data' / 'jobs_history.db'
     DEFAULT_TIMEOUT = 600
     MAX_LOG_SIZE = 10 * 1024 * 1024
     BACKUP_LOG_COUNT = 5
