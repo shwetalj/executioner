@@ -40,7 +40,7 @@ from jobs.command_utils import validate_command, parse_command
 from jobs.env_utils import merge_env_vars, interpolate_env_vars, filter_shell_env
 from jobs.queue_manager import QueueManager
 from jobs.state_manager import StateManager
-from jobs.job_executor import JobExecutor
+from jobs.job_scheduler import JobScheduler
 
 class JobExecutioner:
     def __init__(self, config_file: str):
@@ -142,17 +142,18 @@ class JobExecutioner:
         # Update state manager with logger
         self.state_manager.logger = self.logger
         
-        # Initialize job executor for individual job execution
-        self.job_executor = JobExecutor(
-            config=self.config,
-            app_env_variables=self.app_env_variables,
-            cli_env_variables=self.cli_env_variables,
-            shell_env=self.shell_env,
+        
+        # Initialize job scheduler for execution orchestration
+        self.job_scheduler = JobScheduler(
+            jobs=self.jobs,
+            queue_manager=self.queue_manager,
+            state_manager=self.state_manager,
+            dependency_manager=self.dependency_manager,
+            logger=self.logger,
+            execute_job_func=self._execute_job,
             application_name=self.application_name,
-            run_id=self.run_id,
-            main_logger=self.logger,
-            job_history_manager=self.job_history,
-            setup_job_logger_func=self._setup_job_logger
+            max_workers=self.max_workers,
+            parallel=self.parallel
         )
         
         # Threading primitives (kept for backward compatibility and executor management)
@@ -332,13 +333,6 @@ class JobExecutioner:
                 timeout = 600
         return timeout
 
-    def _run_subprocess_command(self, command: str, job_id: str, job_logger: logging.Logger, timeout: int) -> bool:
-        """Execute a subprocess command (delegated to JobExecutor)."""
-        return self.job_executor.run_subprocess_command(command, job_id, job_logger, timeout)
-
-    def _terminate_process(self, process: subprocess.Popen, job_logger: logging.Logger):
-        """Terminate a process (delegated to JobExecutor)."""
-        self.job_executor._terminate_process(process, job_logger)
 
     def _execute_job(self, job_id: str, return_reason: bool = True):
         job = self.jobs[job_id]
@@ -364,85 +358,8 @@ class JobExecutioner:
         return result, fail_reason
 
     def _run_dry(self, resume_run_id=None, resume_failed_only=False):
-        self.start_time = datetime.datetime.now()
-        self.logger.info(f"Starting dry run - printing execution plan")
-        if resume_run_id:
-            previous_job_statuses = self.job_history.get_previous_run_status(resume_run_id)
-            if not previous_job_statuses:
-                self.logger.error(f"No job history found for run ID {resume_run_id}. Showing full plan.")
-            else:
-                resume_mode = "failed jobs only" if resume_failed_only else "all incomplete jobs"
-                self.logger.info(f"Resuming from run ID {resume_run_id} ({resume_mode})")
-                for job_id, status in previous_job_statuses.items():
-                    if job_id not in self.jobs:
-                        continue
-                    if status == "SUCCESS":
-                        self.skip_jobs.add(job_id)
-                        self.completed_jobs.add(job_id)
-                        self.logger.info(f"Would skip previously successful job: {job_id}")
-                    elif resume_failed_only and status in ["FAILED", "ERROR", "TIMEOUT"]:
-                        self.logger.info(f"Would re-run previously failed job: {job_id}")
-                    elif not resume_failed_only and status not in ["FAILED", "ERROR", "TIMEOUT"]:
-                        self.skip_jobs.add(job_id)
-                        self.completed_jobs.add(job_id)
-                        self.logger.info(f"Would skip job with status {status}: {job_id}")
-        if self.dependency_manager.has_circular_dependencies():
-            self.logger.error("Circular dependencies detected in job configuration")
-            print(f"{Config.COLOR_RED}ERROR: Circular dependencies detected{Config.COLOR_RESET}")
-            sys.exit(1)
-        missing_dependencies = self.dependency_manager.check_missing_dependencies()
-        if missing_dependencies:
-            for job_id, missing_deps in missing_dependencies.items():
-                msg = f"Job '{job_id}' has missing dependencies: {', '.join(missing_deps)}"
-                self.logger.error(msg)
-                print(f"{Config.COLOR_RED}ERROR: {msg}{Config.COLOR_RESET}")
-            if not self.continue_on_error:
-                self.logger.error("Missing dependencies detected. Would abort.")
-                print(f"{Config.COLOR_RED}ERROR: Missing dependencies detected{Config.COLOR_RESET}")
-                return 1
-            print(f"{Config.COLOR_YELLOW}WARNING: Missing dependencies detected but would continue{Config.COLOR_RESET}")
-        parallel_text = f"{Config.COLOR_CYAN}Execution mode:{Config.COLOR_RESET} "
-        parallel_text += f"{Config.COLOR_MAGENTA}PARALLEL with {self.max_workers} workers{Config.COLOR_RESET}" if self.parallel else f"{Config.COLOR_BLUE}SEQUENTIAL{Config.COLOR_RESET}"
-        print(f"\n{parallel_text}")
-        if self.app_env_variables:
-            app_env_vars = sorted(self.app_env_variables.keys())
-            print(f"\n{Config.COLOR_CYAN}Application environment variables:{Config.COLOR_RESET}")
-            print(f"{Config.COLOR_MAGENTA}{', '.join(app_env_vars)}{Config.COLOR_RESET}")
-        print(f"\n{Config.COLOR_CYAN}Job execution order:{Config.COLOR_RESET}")
-        execution_order = self.dependency_manager.get_execution_order()
-        for i, job_id in enumerate(execution_order):
-            job = self.jobs[job_id]
-            job_desc = job.get("description", "")
-            env_vars_info = f" {Config.COLOR_MAGENTA}[ENV: {', '.join(job['env_variables'].keys())}]{Config.COLOR_RESET}" if job.get("env_variables") else ""
-            deps_info = f" {Config.COLOR_CYAN}[DEPS: {', '.join(self.dependency_manager.get_job_dependencies(job_id)) or 'none'}]{Config.COLOR_RESET}"
-            if job_id in self.skip_jobs:
-                print(f"{i+1}. {Config.COLOR_YELLOW}{job_id}{Config.COLOR_RESET} - {job_desc} {Config.COLOR_YELLOW}[SKIPPED]{Config.COLOR_RESET}{env_vars_info}{deps_info}")
-            else:
-                command = job["command"]
-                command_preview = command[:40] + '...' if len(command) > 40 else command
-                print(f"{i+1}. {Config.COLOR_DARK_GREEN}{job_id}{Config.COLOR_RESET} - {job_desc} - {Config.COLOR_BLUE}{command_preview}{Config.COLOR_RESET}{env_vars_info}{deps_info}")
-        self.end_time = datetime.datetime.now()
-        duration = self.end_time - self.start_time
-        duration_str = str(duration).split('.')[0]
-        end_date = self.end_time.strftime("%Y-%m-%d %H:%M:%S")
-        divider = f"{Config.COLOR_CYAN}{'='*40}{Config.COLOR_RESET}"
-        print(f"\n{divider}")
-        print(f"{Config.COLOR_CYAN}{'DRY RUN EXECUTION SUMMARY':^40}{Config.COLOR_RESET}")
-        print(f"{divider}")
-        print(f"{Config.COLOR_CYAN}Application:{Config.COLOR_RESET} {self.application_name}")
-        print(f"{Config.COLOR_CYAN}Run ID:{Config.COLOR_RESET} {self.run_id}")
-        start_time_str = self.start_time.strftime('%Y-%m-%d %H:%M:%S') if self.start_time else "N/A"
-        end_time_str = self.end_time.strftime('%Y-%m-%d %H:%M:%S')
-        print(f"{Config.COLOR_CYAN}Start Time:{Config.COLOR_RESET} {start_time_str}")
-        print(f"{Config.COLOR_CYAN}End Time:{Config.COLOR_RESET} {end_time_str}")
-        print(f"{Config.COLOR_CYAN}Duration:{Config.COLOR_RESET} {duration_str}")
-        print(f"{Config.COLOR_CYAN}Total Jobs:{Config.COLOR_RESET} {len(self.jobs)}")
-        print(f"{Config.COLOR_CYAN}Would Execute:{Config.COLOR_RESET} {Config.COLOR_DARK_GREEN}{len(self.jobs) - len(self.skip_jobs)}{Config.COLOR_RESET}")
-        print(f"{Config.COLOR_CYAN}Would Skip:{Config.COLOR_RESET} {Config.COLOR_YELLOW if len(self.skip_jobs) > 0 else ''}{len(self.skip_jobs)}{Config.COLOR_RESET}")
-        print(f"{divider}")
-        print("\n")
-        self.logger.info(f"Dry run completed for run ID: {self.run_id}")
-        return 0
+        """Execute a dry run showing the execution plan (delegated to JobScheduler)."""
+        return self.job_scheduler.run_dry(resume_run_id, resume_failed_only)
 
     def _get_execution_order(self):
         order = []
@@ -512,16 +429,8 @@ class JobExecutioner:
                     self.completed_jobs.add(job_id)
         # Queue initial jobs that have all dependencies satisfied
         self.queue_manager.queue_initial_jobs()
-        def handle_keyboard_interrupt(signal_num, frame):
-            self.interrupted = True
-            self.logger.info("Received interrupt signal. Stopping after current job...")
-            if dry_run:
-                print("\nInterrupt received. Stopping dry run cleanly...")
-            else:
-                print("\nInterrupt received. Will stop after current job completes...")
-        import signal
-        original_handler = signal.getsignal(signal.SIGINT)
-        signal.signal(signal.SIGINT, handle_keyboard_interrupt)
+        # Setup interrupt handler through job scheduler
+        original_handler = self.job_scheduler.setup_interrupt_handler(dry_run)
         iteration_count = 0
         try:
             if self.parallel and not dry_run:
@@ -529,7 +438,8 @@ class JobExecutioner:
             else:
                 iteration_count = self._run_sequential(max_iter)
         finally:
-            signal.signal(signal.SIGINT, original_handler)
+            # Restore interrupt handler
+            self.job_scheduler.restore_interrupt_handler(original_handler)
             if self.executor is not None:
                 self.logger.debug("Shutting down thread pool executor")
                 self.executor.shutdown(wait=True)
@@ -656,179 +566,12 @@ class JobExecutioner:
         print("\n")
 
     def _run_sequential(self, max_iter: int) -> int:
-        iteration_count = 0
-        while not self.job_queue.empty() and iteration_count < max_iter and not self.interrupted:
-            iteration_count += 1
-            try:
-                job_id = self.job_queue.get(timeout=1)
-            except Empty:
-                break
-            if job_id in self.skip_jobs or job_id in self.completed_jobs:
-                continue
-            deps = self.dependency_manager.get_job_dependencies(job_id)
-            missing_deps = [dep for dep in deps if dep not in self.completed_jobs and dep not in self.skip_jobs]
-            if missing_deps:
-                if all(dep in self.jobs for dep in missing_deps):
-                    self.logger.warning(f"Job {job_id} queued before dependencies were satisfied: {missing_deps}")
-                    continue
-                self.logger.warning(f"Job {job_id} has non-existent dependencies: {missing_deps}")
-                if self.continue_on_error:
-                    self.logger.warning(f"Skipping job {job_id} due to missing dependencies")
-                    self.failed_jobs.add(job_id)
-                    self.failed_job_reasons[job_id] = f"Missing dependencies: {', '.join(missing_deps)}"
-                    continue
-                self.logger.error(f"Job {job_id} has missing dependencies. Stopping.")
-                self.failed_jobs.add(job_id)
-                self.failed_job_reasons[job_id] = f"Missing dependencies: {', '.join(missing_deps)}"
-                self.exit_code = 1
-                break
-            job_success, fail_reason = self._execute_job(job_id)
-            if self.interrupted:
-                self.logger.info("Execution interrupted, stopping gracefully.")
-                break
-            with self.lock:
-                if job_success:
-                    self.queue_manager.add_completed_job(job_id)
-                else:
-                    self.queue_manager.add_failed_job(job_id, fail_reason or "Unknown failure")
-                    if not self.continue_on_error:
-                        self.exit_code = 1
-                        break
-                    self.logger.warning(f"Job {job_id} failed but continuing.")
-            if job_success:
-                self._queue_dependent_jobs(job_id)
-        return iteration_count
+        """Execute jobs sequentially with dependency resolution (delegated to JobScheduler)."""
+        return self.job_scheduler.run_sequential(max_iter)
 
     def _run_parallel(self, max_iter: int) -> int:
-        iteration_count = 0
-        self.executor = ThreadPoolExecutor(max_workers=self.max_workers)
-        self.logger.info(f"Parallel execution with {self.max_workers} workers")
-        pending_futures = set()
-        while (not self.job_queue.empty() or pending_futures) and iteration_count < max_iter and not self.interrupted:
-            iteration_count += 1
-            just_completed_jobs = set()
-            try:
-                completed_futures = list(as_completed(pending_futures, timeout=0.1))
-                for future in completed_futures:
-                    pending_futures.remove(future)
-                    with self.lock:
-                        job_id = self.queue_manager.unregister_future(future)
-                        if not job_id:
-                            continue
-                        try:
-                            job_success, fail_reason = future.result()
-                            if job_success:
-                                self.queue_manager.add_completed_job(job_id)
-                                just_completed_jobs.add(job_id)
-                            else:
-                                self.queue_manager.add_failed_job(job_id, fail_reason or "Unknown failure")
-                                if not self.continue_on_error:
-                                    self.exit_code = 1
-                                    self.interrupted = True
-                                else:
-                                    self.logger.warning(f"Job {job_id} failed but continuing.")
-                        except Exception as e:
-                            self.logger.error(f"Job {job_id} raised exception: {e}")
-                            self.queue_manager.add_failed_job(job_id, f"Exception: {e}")
-                            if not self.continue_on_error:
-                                self.exit_code = 1
-                                self.interrupted = True
-                    with self.job_completed_condition:
-                        self.job_completed_condition.notify_all()
-            except concurrent.futures.TimeoutError:
-                pass
-            for job_id in just_completed_jobs:
-                if not self.interrupted:
-                    self._queue_dependent_jobs(job_id)
-            jobs_queued = 0
-            while not self.job_queue.empty() and not self.interrupted:
-                available_worker_slots = self.max_workers - len(pending_futures)
-                if available_worker_slots <= 0:
-                    break
-                try:
-                    job_id = self.job_queue.get(timeout=0.1)
-                except Empty:
-                    break
-                should_submit = False
-                missing_deps = []
-                with self.lock:
-                    if (job_id in self.skip_jobs or
-                        job_id in self.completed_jobs or
-                        job_id in self.active_jobs):
-                        continue
-                    deps = self.dependency_manager.get_job_dependencies(job_id)
-                    missing_deps = [dep for dep in deps if dep not in self.completed_jobs and dep not in self.skip_jobs]
-                    if not missing_deps:
-                        should_submit = True
-                        self.queue_manager.add_active_job(job_id)
-                if missing_deps:
-                    if all(dep in self.jobs for dep in missing_deps):
-                        self.job_queue.put(job_id)
-                        break
-                    non_existent_deps = [dep for dep in missing_deps if dep not in self.jobs]
-                    self.logger.warning(f"Job {job_id} has non-existent dependencies: {non_existent_deps}")
-                    if self.continue_on_error:
-                        continue
-                    self.logger.error(f"Job {job_id} has missing dependencies. Stopping.")
-                    self.exit_code = 1
-                    self.interrupted = True
-                    break
-                if should_submit:
-                    with self.lock:
-                        # Submit the job
-                        future = self.executor.submit(self._execute_job, job_id)
-                        pending_futures.add(future)
-                        self.queue_manager.register_future(future, job_id)
-                        self.logger.debug(f"Submitted job {job_id}")
-                        jobs_queued += 1
-            if not completed_futures and not jobs_queued:
-                with self.job_completed_condition:
-                    self.job_completed_condition.wait(timeout=1.0)
-                if iteration_count % 10 == 0:
-                    with self.lock:
-                        self.logger.debug(
-                            f"Execution status - Queue: {self.job_queue.qsize()}, Active: {len(self.active_jobs)}, "
-                            f"Completed: {len(self.completed_jobs)}, Failed: {len(self.failed_jobs)}, Skipped: {len(self.skip_jobs)}"
-                        )
-        if pending_futures:
-            self.logger.info(f"Waiting for {len(pending_futures)} active jobs to complete...")
-            futures_to_wait = list(pending_futures)
-            max_wait_time = 30
-            start_wait = time.time()
-            while futures_to_wait and (time.time() - start_wait < max_wait_time):
-                try:
-                    done, futures_to_wait = concurrent.futures.wait(
-                        futures_to_wait, timeout=1.0, return_when=concurrent.futures.FIRST_COMPLETED
-                    )
-                    for future in done:
-                        with self.lock:
-                            job_id = self.queue_manager.unregister_future(future)
-                            if not job_id:
-                                continue
-                            pending_futures.discard(future)
-                            try:
-                                job_success, fail_reason = future.result()
-                                if job_success:
-                                    self.queue_manager.add_completed_job(job_id)
-                                else:
-                                    self.queue_manager.add_failed_job(job_id, fail_reason or "Unknown failure")
-                            except Exception as e:
-                                self.logger.error(f"Exception in job {job_id} during shutdown: {e}")
-                                self.queue_manager.add_failed_job(job_id, f"Exception: {e}")
-                except Exception as e:
-                    self.logger.error(f"Error waiting for jobs during shutdown: {e}")
-                    break
-            if futures_to_wait:
-                self.logger.warning(f"Abandoning {len(futures_to_wait)} jobs after {max_wait_time}s")
-                with self.lock:
-                    for future in futures_to_wait:
-                        future.cancel()
-                        job_id = self.queue_manager.unregister_future(future)
-                        if job_id:
-                            self.queue_manager.add_failed_job(job_id, "Abandoned during shutdown")
-                            pending_futures.discard(future)
-                            self.logger.warning(f"Job {job_id} abandoned during shutdown")
-        return iteration_count
+        """Execute jobs in parallel with dependency resolution (delegated to JobScheduler)."""
+        return self.job_scheduler.run_parallel(max_iter)
 
     def _queue_dependent_jobs(self, completed_job_id: str):
         """Queue jobs that depend on the completed job."""
