@@ -2,7 +2,7 @@ class JobStatusMixin:
     """
     Mixin to provide common job status and retry logic.
     Assumes the class using this mixin has:
-      - self.job_history (JobHistoryManager)
+      - self.job_history (ExecutionHistoryManager)
       - self.logger
     """
 

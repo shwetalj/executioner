@@ -1,7 +1,7 @@
 """
-Job Scheduler for handling execution orchestration and dependency resolution.
+Execution Orchestrator for handling execution flow and coordination.
 
-This module provides the JobScheduler class that handles:
+This module provides the ExecutionOrchestrator class that handles:
 - Sequential and parallel execution strategies
 - Dependency resolution and execution ordering  
 - Dry run execution planning and display
@@ -23,11 +23,11 @@ from jobs.state_manager import StateManager
 from jobs.dependency_manager import DependencyManager
 
 
-class JobScheduler:
+class ExecutionOrchestrator:
     """
-    Handles execution orchestration, scheduling strategies, and dependency resolution.
+    Handles execution orchestration, flow control, and dependency resolution.
     
-    This class encapsulates all scheduling logic including sequential/parallel execution,
+    This class encapsulates all execution logic including sequential/parallel execution,
     dry run planning, and coordination between QueueManager and StateManager.
     """
     
@@ -44,7 +44,7 @@ class JobScheduler:
         parallel: bool = False
     ):
         """
-        Initialize the JobScheduler.
+        Initialize the ExecutionOrchestrator.
         
         Args:
             jobs: Dictionary of job configurations

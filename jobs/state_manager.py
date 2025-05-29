@@ -12,7 +12,7 @@ This module provides the StateManager class that handles:
 import datetime
 import logging
 from typing import Dict, Optional, Any, Set
-from jobs.job_history_manager import JobHistoryManager
+from jobs.execution_history_manager import ExecutionHistoryManager
 
 
 class StateManager:
@@ -27,7 +27,7 @@ class StateManager:
         self, 
         jobs: Dict[str, Dict], 
         application_name: str, 
-        job_history: JobHistoryManager,
+        job_history: ExecutionHistoryManager,
         logger: logging.Logger
     ):
         """
@@ -36,7 +36,7 @@ class StateManager:
         Args:
             jobs: Dictionary of job configurations
             application_name: Name of the application
-            job_history: JobHistoryManager for persistence operations
+            job_history: ExecutionHistoryManager for persistence operations
             logger: Logger instance for debug/info messages
         """
         self.jobs = jobs

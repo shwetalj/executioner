@@ -27,12 +27,12 @@ from pathlib import Path
 import sqlite3
 
 from config.loader import Config
-from db.sqlite_backend import db_connection
+from db.database_connection import db_connection
 from config.validator import validate_config
 from jobs.checks import CHECK_REGISTRY  # Ensure visibility in all contexts
 from jobs.job_runner import JobRunner
-from jobs.logger_factory import setup_logging, setup_job_logger
-from jobs.job_history_manager import JobHistoryManager
+from jobs.logging_setup import setup_logging, setup_job_logger
+from jobs.execution_history_manager import ExecutionHistoryManager
 from jobs.dependency_manager import DependencyManager
 
 from jobs.notification_manager import NotificationManager
@@ -40,7 +40,8 @@ from jobs.command_utils import validate_command, parse_command
 from jobs.env_utils import merge_env_vars, interpolate_env_vars, filter_shell_env
 from jobs.queue_manager import QueueManager
 from jobs.state_manager import StateManager
-from jobs.job_scheduler import JobScheduler
+from jobs.execution_orchestrator import ExecutionOrchestrator
+from jobs.summary_reporter import SummaryReporter
 
 class JobExecutioner:
     def __init__(self, config_file: str):
@@ -79,8 +80,8 @@ class JobExecutioner:
             print("Duplicate job IDs found in configuration")
             sys.exit(1)
         
-        # Initialize JobHistoryManager and StateManager
-        self.job_history = JobHistoryManager(self.jobs, self.application_name, None, temp_logger)
+        # Initialize ExecutionHistoryManager and StateManager
+        self.job_history = ExecutionHistoryManager(self.jobs, self.application_name, None, temp_logger)
         self.state_manager = StateManager(self.jobs, self.application_name, self.job_history, temp_logger)
         
         # Initialize run and set up logger with run_id
@@ -143,8 +144,8 @@ class JobExecutioner:
         self.state_manager.logger = self.logger
         
         
-        # Initialize job scheduler for execution orchestration
-        self.job_scheduler = JobScheduler(
+        # Initialize execution orchestrator for execution coordination
+        self.execution_orchestrator = ExecutionOrchestrator(
             jobs=self.jobs,
             queue_manager=self.queue_manager,
             state_manager=self.state_manager,
@@ -155,6 +156,9 @@ class JobExecutioner:
             max_workers=self.max_workers,
             parallel=self.parallel
         )
+        
+        # Initialize summary reporter for execution results
+        self.summary_reporter = SummaryReporter(self.application_name, config_file)
         
         # Threading primitives (kept for backward compatibility and executor management)
         self.lock = self.queue_manager.lock  # Use queue manager's lock
@@ -345,7 +349,7 @@ class JobExecutioner:
 
     def _run_dry(self, resume_run_id=None, resume_failed_only=False):
         """Execute a dry run showing the execution plan (delegated to JobScheduler)."""
-        return self.job_scheduler.run_dry(resume_run_id, resume_failed_only)
+        return self.execution_orchestrator.run_dry(resume_run_id, resume_failed_only)
 
     def _get_execution_order(self):
         order = []
@@ -416,7 +420,7 @@ class JobExecutioner:
         # Queue initial jobs that have all dependencies satisfied
         self.queue_manager.queue_initial_jobs()
         # Setup interrupt handler through job scheduler
-        original_handler = self.job_scheduler.setup_interrupt_handler(dry_run)
+        original_handler = self.execution_orchestrator.setup_interrupt_handler(dry_run)
         iteration_count = 0
         try:
             if self.parallel and not dry_run:
@@ -425,7 +429,7 @@ class JobExecutioner:
                 iteration_count = self._run_sequential(max_iter)
         finally:
             # Restore interrupt handler
-            self.job_scheduler.restore_interrupt_handler(original_handler)
+            self.execution_orchestrator.restore_interrupt_handler(original_handler)
             if self.executor is not None:
                 self.logger.debug("Shutting down thread pool executor")
                 self.executor.shutdown(wait=True)
@@ -444,87 +448,65 @@ class JobExecutioner:
                     self._send_notification(success=True)
             elif self.email_on_failure or self.email_on_success:
                 self.logger.warning(f"Email notifications enabled but email_address is invalid: '{self.email_address}'.")
+        # Generate and display execution summary
+        self._display_execution_summary()
+        return self.exit_code
+
+    def _display_execution_summary(self) -> None:
+        """Display comprehensive execution summary using SummaryReporter."""
         # Get timing and status info from state manager
         timing_info = self.state_manager.get_timing_info()
         duration_str = timing_info["duration_string"]
         end_date = timing_info["end_time_str"]
         status = self.state_manager.get_run_status()
-        status_color = Config.COLOR_DARK_GREEN if self.exit_code == 0 else Config.COLOR_RED
-        divider = f"{Config.COLOR_CYAN}{'='*40}{Config.COLOR_RESET}"
-        print(f"{divider}")
-        print(f"{Config.COLOR_CYAN}{'EXECUTION SUMMARY':^40}{Config.COLOR_RESET}")
-        print(f"{divider}")
-        print(f"{Config.COLOR_CYAN}Application:{Config.COLOR_RESET} {self.application_name}")
-        print(f"{Config.COLOR_CYAN}Run ID:{Config.COLOR_RESET} {Config.COLOR_YELLOW}{self.run_id}{Config.COLOR_RESET}")
-        print(f"{Config.COLOR_CYAN}Status:{Config.COLOR_RESET} {status_color}{status}{Config.COLOR_RESET}")
-        print(f"{Config.COLOR_CYAN}Start Time:{Config.COLOR_RESET} {self.start_time.strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"{Config.COLOR_CYAN}End Time:{Config.COLOR_RESET} {end_date}")
-        print(f"{Config.COLOR_CYAN}Duration:{Config.COLOR_RESET} {duration_str}")
-        print(f"{Config.COLOR_CYAN}Jobs Completed:{Config.COLOR_RESET} {Config.COLOR_DARK_GREEN}{len(self.completed_jobs)}{Config.COLOR_RESET}")
-        print(f"{Config.COLOR_CYAN}Jobs Failed:{Config.COLOR_RESET} {Config.COLOR_RED if len(self.failed_jobs) > 0 else ''}{len(self.failed_jobs)}{Config.COLOR_RESET}")
-        print(f"{Config.COLOR_CYAN}Jobs Skipped:{Config.COLOR_RESET} {Config.COLOR_YELLOW if len(self.skip_jobs) > 0 else ''}{len(self.skip_jobs)}{Config.COLOR_RESET}")
-        # Prepare failed and skipped jobs for summary
+        start_time_str = self.start_time.strftime('%Y-%m-%d %H:%M:%S')
+        
+        # Print main summary
+        self.summary_reporter.print_execution_summary(
+            run_id=self.run_id,
+            status=status,
+            start_time_str=start_time_str,
+            end_time_str=end_date,
+            duration_str=duration_str,
+            completed_jobs=self.completed_jobs,
+            failed_jobs=self.failed_jobs,
+            skip_jobs=self.skip_jobs,
+            exit_code=self.exit_code
+        )
+        
+        # Calculate skipped jobs due to dependencies
+        skipped_due_to_deps = self.summary_reporter.calculate_skipped_due_to_deps(
+            jobs=self.jobs,
+            completed_jobs=self.completed_jobs,
+            failed_jobs=self.failed_jobs,
+            skip_jobs=self.skip_jobs,
+            dependency_manager=self.dependency_manager
+        )
+        
+        # Print detailed job summaries
+        self.summary_reporter.print_failed_jobs_summary(
+            failed_jobs=self.failed_jobs,
+            jobs_config=self.config["jobs"],
+            job_log_paths=self.job_log_paths,
+            failed_job_reasons=self.failed_job_reasons
+        )
+        
+        self.summary_reporter.print_skipped_jobs_summary(
+            skipped_due_to_deps=skipped_due_to_deps,
+            jobs=self.jobs
+        )
+        
+        # Print resume instructions or run info
         failed_job_order = [j["id"] for j in self.config["jobs"] if j["id"] in self.failed_jobs]
-        skipped_due_to_deps = []
-        for job_id in self.jobs:
-            if job_id not in self.completed_jobs and job_id not in self.failed_jobs and job_id not in self.skip_jobs:
-                unmet = [dep for dep in self.dependency_manager.get_job_dependencies(job_id) if dep not in self.completed_jobs and dep not in self.skip_jobs]
-                failed_unmet = [dep for dep in unmet if dep in self.failed_jobs]
-                skipped_due_to_deps.append((job_id, unmet, failed_unmet))
-
-        # Print summary
-        if failed_job_order:
-            print("\nFailed Jobs:")
-            for job_id in failed_job_order:
-                job_log_path = self.job_log_paths.get(job_id, None)
-                desc = self.jobs[job_id].get('description', '')
-                reason = self.failed_job_reasons.get(job_id, '')
-                print(f"  - {job_id}: {desc}\n      Reason: {reason}")
-                if job_log_path:
-                    print(f"      Log: {job_log_path}")
-        if skipped_due_to_deps:
-            print("\nSkipped Jobs (unmet dependencies):")
-            for job_id, unmet, failed_unmet in skipped_due_to_deps:
-                desc = self.jobs[job_id].get('description', '')
-                if failed_unmet:
-                    print(f"  - {job_id}: {desc}\n      Skipped (failed dependencies: {', '.join(failed_unmet)}; other unmet: {', '.join([d for d in unmet if d not in failed_unmet])})")
-                else:
-                    print(f"  - {job_id}: {desc}\n      Skipped (unmet dependencies: {', '.join(unmet)})")
+        self.summary_reporter.print_resume_instructions(
+            run_id=self.run_id,
+            exit_code=self.exit_code,
+            failed_job_order=failed_job_order,
+            has_skipped_deps=bool(skipped_due_to_deps)
+        )
         
-        # Add resume instructions if run failed
-        if self.exit_code != 0 and (failed_job_order or skipped_due_to_deps):
-            print(f"\n{Config.COLOR_CYAN}RESUME OPTIONS:{Config.COLOR_RESET}")
-            print(f"{Config.COLOR_CYAN}{'='*len('RESUME OPTIONS:')}{Config.COLOR_RESET}")
-            
-            print(f"To resume this run (all incomplete jobs):")
-            print(f"  {Config.COLOR_BLUE}executioner.py -c {self.config_file} --resume-from {self.run_id}{Config.COLOR_RESET}")
-            
-            if failed_job_order:
-                print(f"\nTo retry only failed jobs:")
-                print(f"  {Config.COLOR_BLUE}executioner.py -c {self.config_file} --resume-from {self.run_id} --resume-failed-only{Config.COLOR_RESET}")
-                
-                # Suggest mark-success for manual fixes
-                failed_ids = ','.join(failed_job_order)
-                print(f"\nIf you manually fixed and ran any failed jobs:")
-                print(f"  {Config.COLOR_BLUE}executioner.py --mark-success -r {self.run_id} -j <job_id>{Config.COLOR_RESET}")
-                print(f"  Example: executioner.py --mark-success -r {self.run_id} -j {failed_job_order[0]}")
-            
-            print(f"\nTo see detailed job status:")
-            print(f"  {Config.COLOR_BLUE}executioner.py --show-run {self.run_id}{Config.COLOR_RESET}")
-        elif self.exit_code == 0:
-            # For successful runs, just show how to view details
-            print(f"\n{Config.COLOR_CYAN}RUN INFORMATION:{Config.COLOR_RESET}")
-            print(f"{Config.COLOR_CYAN}{'='*len('RUN INFORMATION:')}{Config.COLOR_RESET}")
-            print(f"To view detailed job status for this run:")
-            print(f"  {Config.COLOR_BLUE}executioner.py --show-run {self.run_id}{Config.COLOR_RESET}")
-            print(f"\nTo list all recent runs for {self.application_name}:")
-            print(f"  {Config.COLOR_BLUE}executioner.py --list-runs {self.application_name}{Config.COLOR_RESET}")
-            print(f"\nTo list all recent runs (all applications):")
-            print(f"  {Config.COLOR_BLUE}executioner.py --list-runs{Config.COLOR_RESET}")
-        
-        print(f"{divider}")
-        print("\n")
-        return self.exit_code
+        # Print final divider
+        self.summary_reporter.print_final_divider()
 
     def _print_abort_summary(self, status, reason=None, missing_deps=None):
         divider = f"{Config.COLOR_CYAN}{'='*40}{Config.COLOR_RESET}"
@@ -553,11 +535,11 @@ class JobExecutioner:
 
     def _run_sequential(self, max_iter: int) -> int:
         """Execute jobs sequentially with dependency resolution (delegated to JobScheduler)."""
-        return self.job_scheduler.run_sequential(max_iter)
+        return self.execution_orchestrator.run_sequential(max_iter)
 
     def _run_parallel(self, max_iter: int) -> int:
         """Execute jobs in parallel with dependency resolution (delegated to JobScheduler)."""
-        return self.job_scheduler.run_parallel(max_iter)
+        return self.execution_orchestrator.run_parallel(max_iter)
 
     def _queue_dependent_jobs(self, completed_job_id: str):
         """Queue jobs that depend on the completed job."""

@@ -5,7 +5,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
-from jobs.logger_factory import setup_logging
+from jobs.logging_setup import setup_logging
 import os
 
 class NotificationManager:

@@ -5,7 +5,7 @@ import os
 import json
 from contextlib import contextmanager
 from config.loader import Config
-from jobs.logger_factory import setup_logging
+from jobs.logging_setup import setup_logging
 
 def get_logger(application_name="executioner", run_id=None):
     return setup_logging(application_name, run_id or "main")

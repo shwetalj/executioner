@@ -1,10 +1,10 @@
 import sqlite3
 import json
-from db.sqlite_backend import db_connection
+from db.database_connection import db_connection
 from jobs.db_utils import handle_db_errors
 from jobs.json_utils import to_json
 
-class JobHistoryManager:
+class ExecutionHistoryManager:
     def __init__(self, jobs, application_name, run_id, logger):
         self.jobs = jobs
         self.application_name = application_name
@@ -19,7 +19,14 @@ class JobHistoryManager:
     def get_new_run_id(self):
         with db_connection(self.logger) as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT MAX(CAST(run_id AS INTEGER)) FROM job_history")
+            # Check both job_history and run_summary tables to get the highest run_id
+            cursor.execute("""
+                SELECT MAX(run_id) FROM (
+                    SELECT CAST(run_id AS INTEGER) as run_id FROM job_history
+                    UNION ALL
+                    SELECT run_id FROM run_summary
+                )
+            """)
             last_run_id = cursor.fetchone()[0]
             return (last_run_id + 1) if last_run_id is not None else 1
     
@@ -28,11 +35,21 @@ class JobHistoryManager:
         """Create a new run summary entry"""
         with db_connection(self.logger) as conn:
             cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO run_summary (run_id, application_name, start_time, status, total_jobs)
-                VALUES (?, ?, ?, 'RUNNING', ?)
-            """, (run_id, application_name, start_time.strftime('%Y-%m-%d %H:%M:%S'), total_jobs))
-            conn.commit()
+            try:
+                cursor.execute("""
+                    INSERT INTO run_summary (run_id, application_name, start_time, status, total_jobs)
+                    VALUES (?, ?, ?, 'RUNNING', ?)
+                """, (run_id, application_name, start_time.strftime('%Y-%m-%d %H:%M:%S'), total_jobs))
+                conn.commit()
+            except Exception as e:
+                # Handle the case where run_summary already exists (e.g., from previous run or race condition)
+                if "UNIQUE constraint failed" in str(e):
+                    self.logger.debug(f"Run summary already exists for run ID {run_id}, skipping creation")
+                    # Check if it's truly a duplicate or if we need to update
+                    cursor.execute("SELECT COUNT(*) FROM run_summary WHERE run_id = ?", (run_id,))
+                    if cursor.fetchone()[0] > 0:
+                        return  # Already exists, that's fine
+                raise  # Re-raise if it's a different error
     
     @handle_db_errors(lambda self: self.logger)
     def update_run_summary(self, run_id, end_time, status, completed_jobs, failed_jobs, skipped_jobs, exit_code):

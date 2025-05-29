@@ -6,7 +6,7 @@ import subprocess
 from queue import Queue, Empty
 from typing import Dict, Any, Tuple
 from jobs.checks import CHECK_REGISTRY
-from jobs.check_executor import run_checks
+from jobs.check_runner import run_checks
 from jobs.job_status_mixin import JobStatusMixin
 from jobs.env_utils import merge_env_vars, interpolate_env_vars
 

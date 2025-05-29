@@ -38,11 +38,11 @@ from pathlib import Path
 # Modularized imports
 from config.loader import Config
 from executioner_logging.setup import ensure_log_dir
-from db.sqlite_backend import db_connection, init_db
+from db.database_connection import db_connection, init_db
 from config.validator import validate_config
 from jobs.executioner import JobExecutioner
 from jobs.env_utils import parse_env_vars, substitute_env_vars_in_obj
-from jobs.logger_factory import setup_logging
+from jobs.logging_setup import setup_logging
 
 def parse_skip_jobs(skip_list):
     """Parse comma-separated job IDs. Supports both repeated and comma-separated formats."""
@@ -292,11 +292,11 @@ Examples:
         Config.set_log_dir(Path.cwd() / "logs")
         ensure_log_dir()
         init_db(verbose=args.verbose)
-        from jobs.job_history_manager import JobHistoryManager
+        from jobs.execution_history_manager import ExecutionHistoryManager
         
         # Create a temporary job history manager just for querying
         temp_logger = setup_logging("executioner", "query")
-        job_history = JobHistoryManager({}, None, None, temp_logger)
+        job_history = ExecutionHistoryManager({}, None, None, temp_logger)
         
         # Get recent runs, optionally filtered by app name
         app_filter = args.list_runs if isinstance(args.list_runs, str) else None
@@ -354,11 +354,11 @@ Examples:
         Config.set_log_dir(Path.cwd() / "logs")
         ensure_log_dir()
         init_db(verbose=args.verbose)
-        from jobs.job_history_manager import JobHistoryManager
+        from jobs.execution_history_manager import ExecutionHistoryManager
         
         # Create job history manager
         temp_logger = setup_logging("executioner", "show-run")
-        job_history = JobHistoryManager({}, None, None, temp_logger)
+        job_history = ExecutionHistoryManager({}, None, None, temp_logger)
         
         # Get run details
         run_details = job_history.get_run_details(args.show_run)
@@ -461,14 +461,14 @@ Examples:
         Config.set_log_dir(Path.cwd() / "logs")
         ensure_log_dir()
         init_db(verbose=args.verbose)
-        from jobs.job_history_manager import JobHistoryManager
+        from jobs.execution_history_manager import ExecutionHistoryManager
         
         # Parse job IDs
         job_ids = [job.strip() for job in args.jobs.split(',')]
         
         # Create job history manager
         temp_logger = setup_logging("executioner", "mark-success")
-        job_history = JobHistoryManager({}, None, None, temp_logger)
+        job_history = ExecutionHistoryManager({}, None, None, temp_logger)
         
         # Get current status of these jobs
         print(f"\nChecking status for run {args.run_id}...")
