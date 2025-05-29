@@ -38,6 +38,7 @@ from jobs.dependency_manager import DependencyManager
 from jobs.notification_manager import NotificationManager
 from jobs.command_utils import validate_command, parse_command
 from jobs.env_utils import merge_env_vars, interpolate_env_vars, filter_shell_env
+from jobs.queue_manager import QueueManager
 
 class JobExecutioner:
     def __init__(self, config_file: str):
@@ -65,7 +66,6 @@ class JobExecutioner:
         self.exit_code = 0
         self.continue_on_error = False
         self.dry_run = False
-        self.skip_jobs: Set[str] = set()
         self.start_time = None
         self.end_time = None
         # Validate configuration schema before accessing jobs
@@ -136,16 +136,12 @@ class JobExecutioner:
             sys.exit(1)
         self.dependency_manager = DependencyManager(self.jobs, self.logger, self.config.get("dependency_plugins", []))
 
-        # Threading primitives
-        self.lock = threading.RLock()
-        self.job_completed_condition = threading.Condition()
-        self.job_queue: Queue = Queue()
-        self.completed_jobs: Set[str] = set()
-        self.failed_jobs: Set[str] = set()
-        self.failed_job_reasons: Dict[str, str] = {}
-        self.queued_jobs: Set[str] = set()
-        self.active_jobs: Set[str] = set()
-        self.future_to_job_id: Dict[Future, str] = {}
+        # Initialize queue manager for job state and queue operations
+        self.queue_manager = QueueManager(self.dependency_manager, self.logger)
+        
+        # Threading primitives (kept for backward compatibility and executor management)
+        self.lock = self.queue_manager.lock  # Use queue manager's lock
+        self.job_completed_condition = self.queue_manager.job_completed_condition
         self.executor = None
         self.interrupted = False
 
@@ -158,6 +154,52 @@ class JobExecutioner:
             sys.exit(1)
 
         self.job_log_paths = {}  # Track job log file paths
+
+    # Properties for backward compatibility - delegate to queue manager
+    @property
+    def job_queue(self) -> Queue:
+        """Access to the job queue."""
+        return self.queue_manager.job_queue
+    
+    @property
+    def completed_jobs(self) -> Set[str]:
+        """Access to completed jobs set."""
+        return self.queue_manager.completed_jobs
+    
+    @property
+    def failed_jobs(self) -> Set[str]:
+        """Access to failed jobs set."""
+        return self.queue_manager.failed_jobs
+    
+    @property
+    def failed_job_reasons(self) -> Dict[str, str]:
+        """Access to failed job reasons."""
+        return self.queue_manager.failed_job_reasons
+    
+    @property
+    def queued_jobs(self) -> Set[str]:
+        """Access to queued jobs set."""
+        return self.queue_manager.queued_jobs
+    
+    @property
+    def active_jobs(self) -> Set[str]:
+        """Access to active jobs set."""
+        return self.queue_manager.active_jobs
+    
+    @property
+    def future_to_job_id(self) -> Dict[Future, str]:
+        """Access to future-to-job-id mapping."""
+        return self.queue_manager.future_to_job_id
+    
+    @property
+    def skip_jobs(self) -> Set[str]:
+        """Access to skip jobs set."""
+        return self.queue_manager.skip_jobs
+    
+    @skip_jobs.setter
+    def skip_jobs(self, value: Set[str]) -> None:
+        """Set skip jobs."""
+        self.queue_manager.set_skip_jobs(value)
 
     def _validate_config(self):
         """Validate configuration against a basic schema."""
@@ -556,15 +598,8 @@ class JobExecutioner:
                         self.skip_jobs.add(job_id)
                         self.completed_jobs.add(job_id)
                         self.logger.info(f"Skipping job with status {status}: {job_id}")
-        with self.lock:
-            for job_id, deps in self.dependency_manager.get_all_dependencies().items():
-                if job_id in self.skip_jobs:
-                    continue
-                all_deps_satisfied = all(dep in self.completed_jobs or dep in self.skip_jobs for dep in deps)
-                if all_deps_satisfied and job_id not in self.queued_jobs:
-                    self.job_queue.put(job_id)
-                    self.queued_jobs.add(job_id)
-                    self.logger.debug(f"Initially queuing job: {job_id}")
+        # Queue initial jobs that have all dependencies satisfied
+        self.queue_manager.queue_initial_jobs()
         def handle_keyboard_interrupt(signal_num, frame):
             self.interrupted = True
             self.logger.info("Received interrupt signal. Stopping after current job...")
@@ -757,10 +792,9 @@ class JobExecutioner:
                 break
             with self.lock:
                 if job_success:
-                    self.completed_jobs.add(job_id)
+                    self.queue_manager.add_completed_job(job_id)
                 else:
-                    self.failed_jobs.add(job_id)
-                    self.failed_job_reasons[job_id] = fail_reason or "Unknown failure"
+                    self.queue_manager.add_failed_job(job_id, fail_reason or "Unknown failure")
                     if not self.continue_on_error:
                         self.exit_code = 1
                         break
@@ -782,18 +816,16 @@ class JobExecutioner:
                 for future in completed_futures:
                     pending_futures.remove(future)
                     with self.lock:
-                        job_id = self.future_to_job_id.pop(future, None)
+                        job_id = self.queue_manager.unregister_future(future)
                         if not job_id:
                             continue
-                        self.active_jobs.discard(job_id)
                         try:
                             job_success, fail_reason = future.result()
                             if job_success:
-                                self.completed_jobs.add(job_id)
+                                self.queue_manager.add_completed_job(job_id)
                                 just_completed_jobs.add(job_id)
                             else:
-                                self.failed_jobs.add(job_id)
-                                self.failed_job_reasons[job_id] = fail_reason or "Unknown failure"
+                                self.queue_manager.add_failed_job(job_id, fail_reason or "Unknown failure")
                                 if not self.continue_on_error:
                                     self.exit_code = 1
                                     self.interrupted = True
@@ -801,7 +833,7 @@ class JobExecutioner:
                                     self.logger.warning(f"Job {job_id} failed but continuing.")
                         except Exception as e:
                             self.logger.error(f"Job {job_id} raised exception: {e}")
-                            self.failed_jobs.add(job_id)
+                            self.queue_manager.add_failed_job(job_id, f"Exception: {e}")
                             if not self.continue_on_error:
                                 self.exit_code = 1
                                 self.interrupted = True
@@ -832,8 +864,7 @@ class JobExecutioner:
                     missing_deps = [dep for dep in deps if dep not in self.completed_jobs and dep not in self.skip_jobs]
                     if not missing_deps:
                         should_submit = True
-                        self.active_jobs.add(job_id)
-                        self.queued_jobs.discard(job_id)
+                        self.queue_manager.add_active_job(job_id)
                 if missing_deps:
                     if all(dep in self.jobs for dep in missing_deps):
                         self.job_queue.put(job_id)
@@ -851,7 +882,7 @@ class JobExecutioner:
                         # Submit the job
                         future = self.executor.submit(self._execute_job, job_id)
                         pending_futures.add(future)
-                        self.future_to_job_id[future] = job_id
+                        self.queue_manager.register_future(future, job_id)
                         self.logger.debug(f"Submitted job {job_id}")
                         jobs_queued += 1
             if not completed_futures and not jobs_queued:
@@ -875,22 +906,19 @@ class JobExecutioner:
                     )
                     for future in done:
                         with self.lock:
-                            job_id = self.future_to_job_id.pop(future, None)
+                            job_id = self.queue_manager.unregister_future(future)
                             if not job_id:
                                 continue
-                            self.active_jobs.discard(job_id)
                             pending_futures.discard(future)
                             try:
                                 job_success, fail_reason = future.result()
                                 if job_success:
-                                    self.completed_jobs.add(job_id)
+                                    self.queue_manager.add_completed_job(job_id)
                                 else:
-                                    self.failed_jobs.add(job_id)
-                                    self.failed_job_reasons[job_id] = fail_reason or "Unknown failure"
+                                    self.queue_manager.add_failed_job(job_id, fail_reason or "Unknown failure")
                             except Exception as e:
                                 self.logger.error(f"Exception in job {job_id} during shutdown: {e}")
-                                self.failed_jobs.add(job_id)
-                                self.failed_job_reasons[job_id] = f"Exception: {e}"
+                                self.queue_manager.add_failed_job(job_id, f"Exception: {e}")
                 except Exception as e:
                     self.logger.error(f"Error waiting for jobs during shutdown: {e}")
                     break
@@ -899,54 +927,16 @@ class JobExecutioner:
                 with self.lock:
                     for future in futures_to_wait:
                         future.cancel()
-                        job_id = self.future_to_job_id.pop(future, None)
+                        job_id = self.queue_manager.unregister_future(future)
                         if job_id:
-                            self.active_jobs.discard(job_id)
-                            self.failed_jobs.add(job_id)
+                            self.queue_manager.add_failed_job(job_id, "Abandoned during shutdown")
                             pending_futures.discard(future)
                             self.logger.warning(f"Job {job_id} abandoned during shutdown")
         return iteration_count
 
     def _queue_dependent_jobs(self, completed_job_id: str):
-        if self.dry_run:
-            return
-        with self.lock:
-            self.logger.debug(f"Queueing jobs dependent on {completed_job_id}")
-            completed_jobs_snapshot = self.completed_jobs.copy()
-            failed_jobs_snapshot = self.failed_jobs.copy()
-            skip_jobs_snapshot = self.skip_jobs.copy()
-            active_jobs_snapshot = self.active_jobs.copy()
-            queued_jobs_snapshot = self.queued_jobs.copy()
-            jobs_to_queue = []
-            for job_id, deps in self.dependency_manager.get_all_dependencies().items():
-                if completed_job_id not in deps:
-                    continue
-                if (job_id in completed_jobs_snapshot or
-                    job_id in queued_jobs_snapshot or
-                    job_id in active_jobs_snapshot or
-                    job_id in skip_jobs_snapshot or
-                    job_id in failed_jobs_snapshot):
-                    continue
-                all_deps_satisfied = True
-                has_failed_deps = False
-                for dep in deps:
-                    if dep in failed_jobs_snapshot:
-                        has_failed_deps = True
-                        self.logger.debug(f"Job {job_id} has failed dependency: {dep}")
-                        break
-                    if dep not in completed_jobs_snapshot and dep not in skip_jobs_snapshot:
-                        all_deps_satisfied = False
-                        break
-                if has_failed_deps:
-                    continue
-                if all_deps_satisfied:
-                    jobs_to_queue.append(job_id)
-                    self.queued_jobs.add(job_id)
-            for job_id in jobs_to_queue:
-                self.job_queue.put(job_id)
-                self.logger.debug(f"Queued dependent job: {job_id}")
-            with self.job_completed_condition:
-                self.job_completed_condition.notify_all()
+        """Queue jobs that depend on the completed job."""
+        self.queue_manager.queue_dependent_jobs(completed_job_id, self.dry_run)
 
     def _send_notification(self, success: bool):
         """Send an email notification using NotificationManager."""
