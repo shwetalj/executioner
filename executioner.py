@@ -38,7 +38,7 @@ from pathlib import Path
 # Modularized imports
 from config.loader import Config
 from executioner_logging.setup import ensure_log_dir
-from db.database_connection import db_connection, init_db
+from db.sqlite_connection import db_connection, init_db
 from config.validator import validate_config
 from jobs.executioner import JobExecutioner
 from jobs.env_utils import parse_env_vars, substitute_env_vars_in_obj

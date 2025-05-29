@@ -1,6 +1,6 @@
 import sqlite3
 import json
-from db.database_connection import db_connection
+from db.sqlite_connection import db_connection
 from jobs.db_utils import handle_db_errors
 from jobs.json_utils import to_json
 

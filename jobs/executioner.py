@@ -27,7 +27,7 @@ from pathlib import Path
 import sqlite3
 
 from config.loader import Config
-from db.database_connection import db_connection
+from db.sqlite_connection import db_connection
 from config.validator import validate_config
 from jobs.checks import CHECK_REGISTRY  # Ensure visibility in all contexts
 from jobs.job_runner import JobRunner
