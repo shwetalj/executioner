@@ -16,7 +16,7 @@ EXIT_CODE_TIMEOUT = -1  # Process timed out and was killed
 EXIT_CODE_EXCEPTION = -2  # Exception occurred during execution
 
 class JobRunner(JobStatusMixin):
-    def __init__(self, job_id: str, job_config: dict, global_env: dict, main_logger, config: dict, run_id: int, app_name: str, db_connection, validate_timeout, update_job_status, update_retry_history, get_last_exit_code, setup_job_logger, cli_env=None, shell_env=None):
+    def __init__(self, job_id: str, job_config: dict, global_env: dict, main_logger, config: dict, run_id: int, app_name: str, db_connection, update_job_status, update_retry_history, get_last_exit_code, setup_job_logger, cli_env=None, shell_env=None):
         self.job_id = job_id
         self.job = job_config
         self.global_env = global_env
@@ -27,7 +27,6 @@ class JobRunner(JobStatusMixin):
         self.run_id = run_id
         self.app_name = app_name
         self.db_connection = db_connection
-        self.validate_timeout = validate_timeout
         self.job_history = None  # Will be set externally
         self.logger = main_logger  # Use main_logger for mixin
         self.get_last_exit_code = get_last_exit_code

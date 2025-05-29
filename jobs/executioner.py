@@ -319,19 +319,6 @@ class JobExecutioner:
         self.job_log_paths[job_id] = job_log_path  # Store the job log path
         return job_logger, job_file_handler, job_log_path
 
-    def _validate_timeout(self, timeout, logger=None):
-        if timeout is not None:
-            try:
-                timeout = int(timeout)
-                if timeout <= 0:
-                    if logger:
-                        logger.warning(f"Invalid timeout value: {timeout}. Using default of 600 seconds.")
-                    timeout = 600
-            except (ValueError, TypeError):
-                if logger:
-                    logger.warning(f"Non-numeric timeout value: {timeout}. Using default of 600 seconds.")
-                timeout = 600
-        return timeout
 
 
     def _execute_job(self, job_id: str, return_reason: bool = True):
@@ -345,7 +332,6 @@ class JobExecutioner:
             run_id=self.run_id,
             app_name=self.application_name,
             db_connection=db_connection,
-            validate_timeout=self._validate_timeout,
             update_job_status=self.job_history.update_job_status,
             update_retry_history=self.job_history.update_retry_history,
             get_last_exit_code=self.job_history.get_last_exit_code,
