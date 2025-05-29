@@ -579,55 +579,20 @@ class JobExecutioner:
 
     def _send_notification(self, success: bool):
         """Send an email notification using NotificationManager."""
-        failed_job_order = [j["id"] for j in self.config["jobs"] if j["id"] in self.failed_jobs]
-        skipped_due_to_deps = []
-        for job_id in self.jobs:
-            if job_id not in self.completed_jobs and job_id not in self.failed_jobs and job_id not in self.skip_jobs:
-                unmet = [dep for dep in self.dependency_manager.get_job_dependencies(job_id) if dep not in self.completed_jobs and dep not in self.skip_jobs]
-                failed_unmet = [dep for dep in unmet if dep in self.failed_jobs]
-                skipped_due_to_deps.append((job_id, unmet, failed_unmet))
-        status = "SUCCESS" if success else "FAILED"
-        duration = self.end_time - self.start_time if self.end_time and self.start_time else None
-        duration_str = str(duration).split('.')[0] if duration else "N/A"
-        summary = (
-            f"Application: {self.application_name}\n"
-            f"Run ID: {self.run_id}\n"
-            f"Status: {status}\n"
-            f"Start Time: {self.start_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
-            f"End Time: {self.end_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
-            f"Duration: {duration_str}\n"
-            f"Jobs Completed: {len(self.completed_jobs)}\n"
-            f"Jobs Failed: {len(self.failed_jobs)}\n"
-            f"Jobs Skipped: {len(self.skip_jobs) + len(skipped_due_to_deps)}\n"
+        summary = self.notification_manager.generate_execution_summary(
+            success=success,
+            run_id=self.run_id,
+            start_time=self.start_time,
+            end_time=self.end_time,
+            completed_jobs=self.completed_jobs,
+            failed_jobs=self.failed_jobs,
+            skip_jobs=self.skip_jobs,
+            jobs_config=self.jobs,
+            dependency_manager=self.dependency_manager,
+            job_log_paths=self.job_log_paths,
+            failed_job_reasons=self.failed_job_reasons
         )
-        if failed_job_order:
-            summary += "\nFailed Jobs:\n"
-            for job_id in failed_job_order:
-                job_log_path = self.job_log_paths.get(job_id, None)
-                desc = self.jobs[job_id].get('description', '')
-                reason = self.failed_job_reasons.get(job_id, '')
-                summary += f"  - {job_id}: {desc}\n      Reason: {reason}"
-                if job_log_path:
-                    summary += f"\n      Log: {job_log_path}"
-                summary += "\n"
-        if skipped_due_to_deps:
-            summary += "\nSkipped Jobs (unmet dependencies):\n"
-            for job_id, unmet, failed_unmet in skipped_due_to_deps:
-                desc = self.jobs[job_id].get('description', '')
-                if failed_unmet:
-                    summary += f"  - {job_id}: {desc}\n      Skipped (failed dependencies: {', '.join(failed_unmet)}; other unmet: {', '.join([d for d in unmet if d not in failed_unmet])})\n"
-                else:
-                    summary += f"  - {job_id}: {desc}\n      Skipped (unmet dependencies: {', '.join(unmet)})\n"
-        # Collect all log files for this run
-        log_pattern = os.path.join(Config.LOG_DIR, f"executioner.{self.application_name}.job-*.run-{self.run_id}.log")
-        attachments = glob.glob(log_pattern)
-        # Add main application-level run log (fix for actual filename)
-        main_log_path = os.path.join(Config.LOG_DIR, f"executioner.{self.application_name}.run-{self.run_id}.log")
-        if not os.path.exists(main_log_path):
-            # Fallback to run-None.log if run_id log does not exist
-            main_log_path = os.path.join(Config.LOG_DIR, f"executioner.{self.application_name}.run-None.log")
-        if os.path.exists(main_log_path):
-            attachments.append(main_log_path)
+        attachments = self.notification_manager.collect_log_attachments(self.run_id)
         self.notification_manager.send_notification(
             success=success,
             run_id=self.run_id,
