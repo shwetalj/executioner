@@ -39,6 +39,8 @@ from jobs.notification_manager import NotificationManager
 from jobs.command_utils import validate_command, parse_command
 from jobs.env_utils import merge_env_vars, interpolate_env_vars, filter_shell_env
 from jobs.queue_manager import QueueManager
+from jobs.state_manager import StateManager
+from jobs.job_executor import JobExecutor
 
 class JobExecutioner:
     def __init__(self, config_file: str):
@@ -63,11 +65,7 @@ class JobExecutioner:
         # Initialize necessary attributes for logging setup
         self.application_name = self.config.get("application_name",
             os.path.splitext(os.path.basename(config_file))[0])
-        self.exit_code = 0
-        self.continue_on_error = False
-        self.dry_run = False
-        self.start_time = None
-        self.end_time = None
+        
         # Validate configuration schema before accessing jobs
         # Use a temporary logger for validation errors
         temp_logger = setup_logging(self.application_name, "main")
@@ -80,11 +78,13 @@ class JobExecutioner:
         if len(self.jobs) != len(self.config["jobs"]):
             print("Duplicate job IDs found in configuration")
             sys.exit(1)
-        # Initialize JobHistoryManager (run_id will be set after DB query)
+        
+        # Initialize JobHistoryManager and StateManager
         self.job_history = JobHistoryManager(self.jobs, self.application_name, None, temp_logger)
-        self.run_id = self.job_history.get_new_run_id()
-        self.job_history.run_id = self.run_id
-        # Now set up the logger with the correct run_id and update JobHistoryManager
+        self.state_manager = StateManager(self.jobs, self.application_name, self.job_history, temp_logger)
+        
+        # Initialize run and set up logger with run_id
+        self.run_id = self.state_manager.initialize_run()
         self.logger = setup_logging(self.application_name, self.run_id)
         self.job_history.set_logger(self.logger)
         
@@ -139,11 +139,26 @@ class JobExecutioner:
         # Initialize queue manager for job state and queue operations
         self.queue_manager = QueueManager(self.dependency_manager, self.logger)
         
+        # Update state manager with logger
+        self.state_manager.logger = self.logger
+        
+        # Initialize job executor for individual job execution
+        self.job_executor = JobExecutor(
+            config=self.config,
+            app_env_variables=self.app_env_variables,
+            cli_env_variables=self.cli_env_variables,
+            shell_env=self.shell_env,
+            application_name=self.application_name,
+            run_id=self.run_id,
+            main_logger=self.logger,
+            job_history_manager=self.job_history,
+            setup_job_logger_func=self._setup_job_logger
+        )
+        
         # Threading primitives (kept for backward compatibility and executor management)
         self.lock = self.queue_manager.lock  # Use queue manager's lock
         self.job_completed_condition = self.queue_manager.job_completed_condition
         self.executor = None
-        self.interrupted = False
 
         # Validate dependencies
         if self.dependency_manager.has_circular_dependencies():
@@ -200,6 +215,70 @@ class JobExecutioner:
     def skip_jobs(self, value: Set[str]) -> None:
         """Set skip jobs."""
         self.queue_manager.set_skip_jobs(value)
+    
+    # Properties for backward compatibility - delegate to state manager
+    @property
+    def exit_code(self) -> int:
+        """Access to exit code."""
+        return self.state_manager.exit_code
+    
+    @exit_code.setter
+    def exit_code(self, value: int) -> None:
+        """Set exit code."""
+        self.state_manager.set_exit_code(value)
+    
+    @property
+    def start_time(self) -> Optional[datetime.datetime]:
+        """Access to start time."""
+        return self.state_manager.start_time
+    
+    @start_time.setter
+    def start_time(self, value: Optional[datetime.datetime]) -> None:
+        """Set start time."""
+        self.state_manager.start_time = value
+    
+    @property
+    def end_time(self) -> Optional[datetime.datetime]:
+        """Access to end time."""
+        return self.state_manager.end_time
+    
+    @end_time.setter
+    def end_time(self, value: Optional[datetime.datetime]) -> None:
+        """Set end time."""
+        self.state_manager.end_time = value
+    
+    @property
+    def continue_on_error(self) -> bool:
+        """Access to continue on error flag."""
+        return self.state_manager.continue_on_error
+    
+    @continue_on_error.setter
+    def continue_on_error(self, value: bool) -> None:
+        """Set continue on error flag."""
+        self.state_manager.continue_on_error = value
+    
+    @property
+    def dry_run(self) -> bool:
+        """Access to dry run flag."""
+        return self.state_manager.dry_run
+    
+    @dry_run.setter
+    def dry_run(self, value: bool) -> None:
+        """Set dry run flag."""
+        self.state_manager.dry_run = value
+    
+    @property
+    def interrupted(self) -> bool:
+        """Access to interrupted flag."""
+        return self.state_manager.interrupted
+    
+    @interrupted.setter
+    def interrupted(self, value: bool) -> None:
+        """Set interrupted flag."""
+        if value:
+            self.state_manager.mark_interrupted()
+        else:
+            self.state_manager.interrupted = value
 
     def _validate_config(self):
         """Validate configuration against a basic schema."""
@@ -254,164 +333,12 @@ class JobExecutioner:
         return timeout
 
     def _run_subprocess_command(self, command: str, job_id: str, job_logger: logging.Logger, timeout: int) -> bool:
-        process = None
-        output_queue = Queue()
-        stop_event = threading.Event()
-        process_complete = threading.Event()
-        try:
-            is_safe, reason = validate_command(command, job_id, job_logger, self.config)
-            security_policy = self.config.get("security_policy", "warn")
-            if not is_safe:
-                error_msg = f"Command execution blocked by security policy: {reason}"
-                job_logger.error(error_msg)
-                print(f"{Config.COLOR_RED}{error_msg}{Config.COLOR_RESET}")
-                self.job_history.update_job_status(job_id, "BLOCKED")
-                return False
-            if reason:
-                warning = f"Command has potentially unsafe patterns but will be executed: {command}"
-                job_logger.warning(warning)
-                print(f"{Config.COLOR_YELLOW}{warning}{Config.COLOR_RESET}")
-            job = self.jobs[job_id]
-            # Merge environment variables: app -> job -> CLI (CLI has highest precedence)
-            merged_env = merge_env_vars(self.app_env_variables, job.get("env_variables", {}))
-            merged_env = merge_env_vars(merged_env, self.cli_env_variables)
-            # Interpolate variables after merging so job vars can reference app/CLI vars
-            merged_env = interpolate_env_vars(merged_env, job_logger)
-            # Start with filtered shell environment instead of full os.environ
-            modified_env = self.shell_env.copy()
-            modified_env.update(merged_env)
-            env_var_sources = []
-            if self.app_env_variables:
-                env_var_sources.append("application")
-            if job.get("env_variables"):
-                env_var_sources.append(f"job '{job_id}'")
-            if env_var_sources:
-                all_env_keys = sorted(set(self.app_env_variables.keys()) | set(job.get("env_variables", {}).keys()))
-                job_logger.info(f"Using environment variables from {' and '.join(env_var_sources)}: {all_env_keys}")
-            parsed_command = parse_command(command, job_logger)
-            if parsed_command and not parsed_command.get('needs_shell', True):
-                cmd_args = parsed_command.get('args', [])
-                if not cmd_args:
-                    job_logger.error("Command parsing failed, no arguments to execute")
-                    self.job_history.update_job_status(job_id, "ERROR")
-                    return False
-                job_logger.info(f"Executing command without shell: {' '.join(cmd_args)}")
-                process = subprocess.Popen(
-                    cmd_args,
-                    shell=False,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    universal_newlines=True,
-                    bufsize=1,
-                    env=modified_env,
-                    preexec_fn=os.setsid if 'posix' in os.name else None
-                )
-            else:
-                if not self.allow_shell:
-                    job_logger.error("Shell execution required but disabled by configuration (allow_shell=False)")
-                    self.job_history.update_job_status(job_id, "ERROR")
-                    return False
-                shell_features_needed = parsed_command.get('needs_shell', True) if parsed_command else True
-                job_logger.warning(f"Using shell=True for command execution: {command}")
-                job_logger.info(f"Shell required because: {parsed_command.get('shell_reason', 'Command requires shell features')}" if parsed_command else "Command parsing failed, defaulting to shell")
-                process = subprocess.Popen(
-                    command,
-                    shell=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    universal_newlines=True,
-                    bufsize=1,
-                    env=modified_env,
-                    preexec_fn=os.setsid if 'posix' in os.name else None
-                )
-            job_logger.info(f"Started process with PID: {process.pid}")
-            def stream_output():
-                try:
-                    if process and process.stdout:
-                        for line in process.stdout:
-                            if stop_event.is_set():
-                                break
-                            line = line.rstrip()
-                            job_logger.info(line)
-                            if 'error' in line.lower():
-                                output_queue.put((Config.COLOR_RED, f"{line}"))
-                            elif 'warning' in line.lower():
-                                output_queue.put((Config.COLOR_YELLOW, f"{line}"))
-                            else:
-                                output_queue.put((Config.COLOR_BLUE, f"{line}"))
-                except Exception as e:
-                    job_logger.error(f"Error in stream_output: {e}")
-                finally:
-                    process_complete.set()
-            def display_output():
-                while not stop_event.is_set() or not output_queue.empty():
-                    try:
-                        output_queue.get(timeout=1)
-                    except Empty:
-                        if process_complete.is_set() and output_queue.empty():
-                            break
-                        continue
-                    except Exception as e:
-                        job_logger.error(f"Error in display_output: {e}")
-                        if stop_event.is_set():
-                            break
-            output_stream_thread = threading.Thread(target=stream_output, daemon=True)
-            output_display_thread = threading.Thread(target=display_output, daemon=True)
-            output_stream_thread.start()
-            output_display_thread.start()
-            try:
-                import signal
-                exit_code = process.wait(timeout=timeout)
-                job_logger.debug(f"Process exited with code {exit_code}")
-            except subprocess.TimeoutExpired:
-                job_logger.error(f"Job {job_id}: TIMEOUT after {timeout} seconds")
-                self._terminate_process(process, job_logger)
-                stop_event.set()
-                process_complete.set()
-                self.job_history.update_job_status(job_id, "TIMEOUT")
-                self.logger.error(f"Job '{job_id}' timed out after {timeout} seconds")
-                return False
-            finally:
-                stop_event.set()
-                output_stream_thread.join(timeout=5)
-                output_display_thread.join(timeout=5)
-                if output_stream_thread.is_alive() or output_display_thread.is_alive():
-                    job_logger.warning("Output processing threads did not terminate cleanly")
-                if process and process.stdout:
-                    process.stdout.close()
-            if process.returncode == 0:
-                job_logger.info(f"Job {job_id}: SUCCESS")
-                self.job_history.update_job_status(job_id, "SUCCESS")
-                self.logger.info(f"Job '{job_id}' completed successfully")
-                return True
-            else:
-                job_logger.error(f"Job {job_id}: FAILED with exit code {process.returncode}")
-                self.job_history.update_job_status(job_id, "FAILED")
-                self.logger.error(f"Job '{job_id}' failed with exit code {process.returncode}")
-                return False
-        except Exception as e:
-            error_msg = f"Exception during process execution: {e}"
-            job_logger.error(error_msg)
-            if process and process.poll() is None:
-                self._terminate_process(process, job_logger)
-            self.job_history.update_job_status(job_id, "ERROR")
-            self.logger.error(f"Job '{job_id}' failed with exception: {e}")
-            return False
+        """Execute a subprocess command (delegated to JobExecutor)."""
+        return self.job_executor.run_subprocess_command(command, job_id, job_logger, timeout)
 
     def _terminate_process(self, process: subprocess.Popen, job_logger: logging.Logger):
-        try:
-            if 'posix' in os.name:
-                os.killpg(os.getpgid(process.pid), signal.SIGTERM)
-                time.sleep(1)
-                if process.poll() is None:
-                    os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-            else:
-                process.terminate()
-                time.sleep(1)
-                if process.poll() is None:
-                    process.kill()
-        except OSError as e:
-            job_logger.error(f"Error killing process: {e}")
+        """Terminate a process (delegated to JobExecutor)."""
+        self.job_executor._terminate_process(process, job_logger)
 
     def _execute_job(self, job_id: str, return_reason: bool = True):
         job = self.jobs[job_id]
@@ -541,11 +468,9 @@ class JobExecutioner:
         if self.dependency_plugins:
             self.logger.info(f"Found {len(self.dependency_plugins)} dependency plugins to load")
             self.dependency_manager.load_dependency_plugins()
-        self.continue_on_error = continue_on_error
-        self.dry_run = dry_run
+        # Set initial state through state manager
+        self.state_manager.start_execution(continue_on_error, dry_run)
         self.skip_jobs = set(skip_jobs or [])
-        self.start_time = None
-        self.interrupted = False
         divider = f"{Config.COLOR_CYAN}{'='*90}{Config.COLOR_RESET}"
         dry_run_text = " [DRY RUN]" if dry_run else ""
         parallel_text = f" [PARALLEL: {self.max_workers} workers]" if self.parallel else " [SEQUENTIAL]"
@@ -570,34 +495,21 @@ class JobExecutioner:
                 self.exit_code = 1
                 self._print_abort_summary("FAILED", reason="Missing dependencies detected", missing_deps=missing_dependencies)
                 return self.exit_code
-        self.start_time = datetime.datetime.now()
-        # Create run summary entry
-        if not dry_run:
-            self.job_history.create_run_summary(self.run_id, self.application_name, self.start_time, len(self.jobs))
+        # StateManager.start_execution() already handles timing and run summary creation
         print(f"{divider}")
         print(f"{Config.COLOR_CYAN}{f'STARTING EXECUTION Application {self.application_name} - RUN #{self.run_id}{dry_run_text}{parallel_text}':^90}{Config.COLOR_RESET}")
         print(f"{divider}")
-        previous_job_statuses = {}
+        # Handle resume functionality
         if resume_run_id is not None:
-            previous_job_statuses = self.job_history.get_previous_run_status(resume_run_id)
-            if not previous_job_statuses:
-                self.logger.error(f"No job history found for run ID {resume_run_id}. Starting fresh.")
-            else:
-                self.logger.info(f"Resuming from run ID {resume_run_id}" +
-                               (" (failed jobs only)" if resume_failed_only else ""))
-                for job_id, status in previous_job_statuses.items():
-                    if job_id not in self.jobs:
-                        continue
-                    if status == "SUCCESS":
-                        self.skip_jobs.add(job_id)
-                        self.completed_jobs.add(job_id)
-                        self.logger.info(f"Skipping previously successful job: {job_id}")
-                    elif resume_failed_only and status in ["FAILED", "ERROR", "TIMEOUT"]:
-                        self.logger.info(f"Will re-run previously failed job: {job_id}")
-                    elif not resume_failed_only and status not in ["FAILED", "ERROR", "TIMEOUT"]:
-                        self.skip_jobs.add(job_id)
-                        self.completed_jobs.add(job_id)
-                        self.logger.info(f"Skipping job with status {status}: {job_id}")
+            previous_job_statuses = self.state_manager.setup_resume(resume_run_id, resume_failed_only)
+            resume_skip_jobs = self.state_manager.determine_jobs_to_skip()
+            # Add resume skip jobs to current skip jobs
+            current_skip_jobs = set(skip_jobs or [])
+            self.skip_jobs = current_skip_jobs | resume_skip_jobs
+            # Mark successful jobs as completed in queue manager
+            for job_id in resume_skip_jobs:
+                if job_id in previous_job_statuses and previous_job_statuses[job_id] == "SUCCESS":
+                    self.completed_jobs.add(job_id)
         # Queue initial jobs that have all dependencies satisfied
         self.queue_manager.queue_initial_jobs()
         def handle_keyboard_interrupt(signal_num, frame):
@@ -622,30 +534,13 @@ class JobExecutioner:
                 self.logger.debug("Shutting down thread pool executor")
                 self.executor.shutdown(wait=True)
                 self.executor = None
-            self.job_history.commit_job_statuses()
+            self.state_manager.commit_job_statuses()
         if iteration_count >= max_iter:
             self.logger.error(f"Reached maximum iteration limit ({max_iter}). Possible infinite loop detected.")
             self.exit_code = 1
-        self.end_time = datetime.datetime.now()
+        # Finish execution through state manager
         if not self.dry_run:
-            status = "SUCCESS" if self.exit_code == 0 else "FAILED"
-            duration = self.end_time - self.start_time
-            duration_str = str(duration).split('.')[0]
-            not_completed = set(self.jobs.keys()) - self.completed_jobs - self.skip_jobs
-            if not_completed:
-                self.logger.warning(f"The following jobs were not completed: {', '.join(not_completed)}")
-                self.exit_code = 1
-            
-            # Update run summary with final results
-            self.job_history.update_run_summary(
-                self.run_id, 
-                self.end_time, 
-                status,
-                len(self.completed_jobs),
-                len(self.failed_jobs),
-                len(self.skip_jobs),
-                self.exit_code
-            )
+            self.state_manager.finish_execution(self.completed_jobs, self.failed_jobs, self.skip_jobs)
             if self._has_valid_email():
                 if len(self.failed_jobs) > 0 and self.email_on_failure:
                     self._send_notification(success=False)
@@ -653,10 +548,11 @@ class JobExecutioner:
                     self._send_notification(success=True)
             elif self.email_on_failure or self.email_on_success:
                 self.logger.warning(f"Email notifications enabled but email_address is invalid: '{self.email_address}'.")
-        duration = self.end_time - self.start_time
-        duration_str = str(duration).split('.')[0]
-        end_date = self.end_time.strftime("%Y-%m-%d %H:%M:%S")
-        status = "SUCCESS" if self.exit_code == 0 else "FAILED"
+        # Get timing and status info from state manager
+        timing_info = self.state_manager.get_timing_info()
+        duration_str = timing_info["duration_string"]
+        end_date = timing_info["end_time_str"]
+        status = self.state_manager.get_run_status()
         status_color = Config.COLOR_DARK_GREEN if self.exit_code == 0 else Config.COLOR_RED
         divider = f"{Config.COLOR_CYAN}{'='*40}{Config.COLOR_RESET}"
         print(f"{divider}")
