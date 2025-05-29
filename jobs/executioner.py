@@ -37,10 +37,12 @@ from jobs.dependency_manager import DependencyManager
 
 from jobs.notification_manager import NotificationManager
 from jobs.command_utils import validate_command, parse_command
-from jobs.env_utils import merge_env_vars
+from jobs.env_utils import merge_env_vars, interpolate_env_vars
 
 class JobExecutioner:
     def __init__(self, config_file: str):
+        # Store the config file path for later use
+        self.config_file = config_file
         # Set up a minimal logger for early errors
         # self.logger = logging.getLogger('executioner')
         # self.logger.handlers.clear()
@@ -116,6 +118,9 @@ class JobExecutioner:
 
         # Environment variables
         self.app_env_variables = self.config.get("env_variables", {})
+        # Interpolate application-level environment variables
+        self.app_env_variables = interpolate_env_vars(self.app_env_variables, self.logger)
+        self.cli_env_variables = {}  # Will be set by main executioner
         
         # Handle dependency plugins if specified
         self.dependency_plugins = self.config.get("dependency_plugins", [])
@@ -221,7 +226,11 @@ class JobExecutioner:
                 job_logger.warning(warning)
                 print(f"{Config.COLOR_YELLOW}{warning}{Config.COLOR_RESET}")
             job = self.jobs[job_id]
+            # Merge environment variables: app -> job -> CLI (CLI has highest precedence)
             merged_env = merge_env_vars(self.app_env_variables, job.get("env_variables", {}))
+            merged_env = merge_env_vars(merged_env, self.cli_env_variables)
+            # Interpolate variables after merging so job vars can reference app/CLI vars
+            merged_env = interpolate_env_vars(merged_env, job_logger)
             modified_env = os.environ.copy()
             modified_env.update(merged_env)
             env_var_sources = []
@@ -372,7 +381,8 @@ class JobExecutioner:
             update_job_status=self.job_history.update_job_status,
             update_retry_history=self.job_history.update_retry_history,
             get_last_exit_code=self.job_history.get_last_exit_code,
-            setup_job_logger=self._setup_job_logger
+            setup_job_logger=self._setup_job_logger,
+            cli_env=self.cli_env_variables
         )
         runner.job_history = self.job_history
         result, fail_reason = runner.run(dry_run=self.dry_run, continue_on_error=self.continue_on_error, return_reason=True)
@@ -654,11 +664,11 @@ class JobExecutioner:
             print(f"{Config.COLOR_CYAN}{'='*len('RESUME OPTIONS:')}{Config.COLOR_RESET}")
             
             print(f"To resume this run (all incomplete jobs):")
-            print(f"  {Config.COLOR_BLUE}executioner.py -c <config> --resume-from {self.run_id}{Config.COLOR_RESET}")
+            print(f"  {Config.COLOR_BLUE}executioner.py -c {self.config_file} --resume-from {self.run_id}{Config.COLOR_RESET}")
             
             if failed_job_order:
                 print(f"\nTo retry only failed jobs:")
-                print(f"  {Config.COLOR_BLUE}executioner.py -c <config> --resume-from {self.run_id} --resume-failed-only{Config.COLOR_RESET}")
+                print(f"  {Config.COLOR_BLUE}executioner.py -c {self.config_file} --resume-from {self.run_id} --resume-failed-only{Config.COLOR_RESET}")
                 
                 # Suggest mark-success for manual fixes
                 failed_ids = ','.join(failed_job_order)

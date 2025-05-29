@@ -11,13 +11,13 @@ class Config:
     MAX_LOG_SIZE = 10 * 1024 * 1024
     BACKUP_LOG_COUNT = 5
 
-    # ANSI Colors
-    COLOR_BLUE = "\033[94m"
-    COLOR_DARK_GREEN = "\033[32m"
-    COLOR_RED = "\033[91m"
-    COLOR_CYAN = "\033[36m"
-    COLOR_YELLOW = "\033[93m"
-    COLOR_MAGENTA = "\033[95m"
+    # ANSI Colors - Optimized for both light and dark backgrounds
+    COLOR_BLUE = "\033[38;5;33m"      # Dodger Blue - works well on both
+    COLOR_DARK_GREEN = "\033[38;5;28m" # Forest Green - good contrast
+    COLOR_RED = "\033[38;5;196m"       # Bright Red - universally visible
+    COLOR_CYAN = "\033[38;5;33m"       # Same as Blue (Dodger Blue)
+    COLOR_YELLOW = "\033[38;5;208m"    # Dark Orange - readable on both backgrounds
+    COLOR_MAGENTA = "\033[38;5;201m"   # Hot Magenta - vibrant on both
     COLOR_RESET = "\033[0m" 
 
     @classmethod

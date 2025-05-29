@@ -21,7 +21,7 @@ def db_connection(logger):
         yield conn
     except sqlite3.Error as e:
         # Rollback any pending transaction before re-raising
-        if conn:
+        if conn is not None:
             try:
                 conn.rollback()
                 logger.debug("Rolled back transaction due to database error")
@@ -29,8 +29,18 @@ def db_connection(logger):
                 pass  # Connection might be broken
         logger.error(f"Database error: {e}")
         raise
+    except Exception as e:
+        # Handle non-SQLite exceptions
+        if conn is not None:
+            try:
+                conn.rollback()
+                logger.debug("Rolled back transaction due to error")
+            except sqlite3.Error:
+                pass  # Connection might be broken
+        logger.error(f"Unexpected error: {e}")
+        raise
     finally:
-        if conn:
+        if conn is not None:
             try:
                 conn.close()
             except Exception as e:

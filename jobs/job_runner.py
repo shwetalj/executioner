@@ -8,12 +8,19 @@ from typing import Dict, Any, Tuple
 from jobs.checks import CHECK_REGISTRY
 from jobs.check_executor import run_checks
 from jobs.job_status_mixin import JobStatusMixin
+from jobs.env_utils import merge_env_vars, interpolate_env_vars
+
+# Exit code constants
+EXIT_CODE_SUCCESS = 0
+EXIT_CODE_TIMEOUT = -1  # Process timed out and was killed
+EXIT_CODE_EXCEPTION = -2  # Exception occurred during execution
 
 class JobRunner(JobStatusMixin):
-    def __init__(self, job_id: str, job_config: dict, global_env: dict, main_logger, config: dict, run_id: int, app_name: str, db_connection, validate_timeout, update_job_status, update_retry_history, get_last_exit_code, setup_job_logger):
+    def __init__(self, job_id: str, job_config: dict, global_env: dict, main_logger, config: dict, run_id: int, app_name: str, db_connection, validate_timeout, update_job_status, update_retry_history, get_last_exit_code, setup_job_logger, cli_env=None):
         self.job_id = job_id
         self.job = job_config
         self.global_env = global_env
+        self.cli_env = cli_env or {}
         self.main_logger = main_logger  # Main logger for user-facing output
         self.config = config
         self.run_id = run_id
@@ -196,14 +203,28 @@ class JobRunner(JobStatusMixin):
                 return False, fail_reason
             return False
         finally:
-            job_logger.removeHandler(job_file_handler)
-            job_file_handler.close()
+            try:
+                job_logger.removeHandler(job_file_handler)
+            except Exception as e:
+                # Log the error but continue to try closing the handler
+                if hasattr(self, 'main_logger'):
+                    self.main_logger.debug(f"Error removing handler: {e}")
+            try:
+                job_file_handler.close()
+            except Exception as e:
+                # Log the error but continue
+                if hasattr(self, 'main_logger'):
+                    self.main_logger.debug(f"Error closing file handler: {e}")
 
     def _run_command(self, command, timeout, job_logger):
         import threading
+        # Merge environment variables: app -> job -> CLI (CLI has highest precedence)
+        merged_env = merge_env_vars(self.global_env, self.job.get("env_variables", {}))
+        merged_env = merge_env_vars(merged_env, self.cli_env)
+        # Interpolate variables after merging so job vars can reference app/CLI vars
+        merged_env = interpolate_env_vars(merged_env, job_logger)
         env = os.environ.copy()
-        env.update({k: str(v) for k, v in self.global_env.items()})
-        env.update({k: str(v) for k, v in self.job.get("env_variables", {}).items()})
+        env.update(merged_env)
         process = subprocess.Popen(
             command,
             shell=True,
@@ -253,8 +274,8 @@ class JobRunner(JobStatusMixin):
                 reader_thread.join(timeout=5)
                 if reader_thread.is_alive():
                     job_logger.warning("Output reading thread did not terminate cleanly after timeout")
-                # Set exit code to -1 for timeout
-                self.last_exit_code = -1
+                # Set exit code to EXIT_CODE_TIMEOUT for timeout
+                self.last_exit_code = EXIT_CODE_TIMEOUT
                 self.mark_failed(self.job_id, "TIMEOUT")
                 return "TIMEOUT"
             stop_reading.set()
@@ -262,7 +283,7 @@ class JobRunner(JobStatusMixin):
             if reader_thread.is_alive():
                 job_logger.warning("Output reading thread did not terminate cleanly after process exit")
             self.last_exit_code = exit_code
-            if exit_code == 0:
+            if exit_code == EXIT_CODE_SUCCESS:
                 job_logger.info(f"Job {self.job_id}: SUCCESS")
                 self.mark_success(self.job_id)
                 return "SUCCESS"
@@ -272,8 +293,8 @@ class JobRunner(JobStatusMixin):
                 return "FAILED"
         except Exception as e:
             job_logger.error(f"Exception during command execution: {e}")
-            # Set exit code to -2 for exceptions
-            self.last_exit_code = -2
+            # Set exit code to EXIT_CODE_EXCEPTION for exceptions
+            self.last_exit_code = EXIT_CODE_EXCEPTION
             self.mark_failed(self.job_id, "ERROR")
             return "ERROR"
         finally:

@@ -1,0 +1,36 @@
+{
+  "application_name": "test_env_interp",
+  "env_variables": {
+    "BASE_DIR": "/opt/oracle",
+    "ORACLE_BASE": "${BASE_DIR}/database",
+    "VERSION": "19c"
+  },
+  "jobs": [
+    {
+      "id": "show_oracle_home",
+      "description": "Show ORACLE_HOME derived from ORACLE_BASE",
+      "command": "echo ORACLE_HOME=${ORACLE_HOME}",
+      "env_variables": {
+        "ORACLE_HOME": "${ORACLE_BASE}/dbhome_${VERSION}"
+      }
+    },
+    {
+      "id": "show_all_paths",
+      "description": "Show all Oracle paths",
+      "command": "echo BASE_DIR=${BASE_DIR} && echo ORACLE_BASE=${ORACLE_BASE} && echo ORACLE_HOME=${ORACLE_HOME}",
+      "env_variables": {
+        "ORACLE_HOME": "${ORACLE_BASE}/dbhome_${VERSION}",
+        "ORACLE_SID": "ORCL"
+      }
+    },
+    {
+      "id": "test_circular",
+      "description": "Test circular reference handling",
+      "command": "echo VAR1=${VAR1} VAR2=${VAR2}",
+      "env_variables": {
+        "VAR1": "${VAR2}",
+        "VAR2": "${VAR1}"
+      }
+    }
+  ]
+}

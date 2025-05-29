@@ -265,6 +265,9 @@ Notes:
     
     # Handle --show-run flag
     if args.show_run:
+        if args.show_run <= 0:
+            print("Error: Run ID must be a positive integer")
+            sys.exit(1)
         # Initialize database
         Config.set_log_dir(Path.cwd() / "logs")
         ensure_log_dir()
@@ -358,6 +361,12 @@ Notes:
             print(f"... and {len(failed_jobs) - 3} more failed job logs")
         
         sys.exit(0)
+    
+    # Validate run_id if provided
+    if args.run_id is not None:
+        if args.run_id <= 0:
+            print("Error: Run ID must be a positive integer")
+            sys.exit(1)
     
     # Handle --mark-success flag
     if args.mark_success:
@@ -468,13 +477,8 @@ Notes:
     # Parse CLI envs if provided
     env_vars = parse_env_vars(args.env, debug=args.debug) if args.env else {}
 
-    # Always perform substitution for every job, merging app-level, job-level, and CLI envs
-    for job_id, job in executioner.jobs.items():
-        merged_envs = dict(executioner.app_env_variables)
-        merged_envs.update(original_job_envs.get(job_id, {}))
-        merged_envs.update(env_vars)
-        job["env_variables"] = merged_envs
-        executioner.jobs[job_id] = substitute_env_vars_in_obj(job, merged_envs)
+    # Store CLI environment variables in executioner for later use
+    executioner.cli_env_variables = env_vars
 
     # Show merged environment for each job
     if args.visible or args.debug:
@@ -516,6 +520,11 @@ Notes:
 
     if args.resume_failed_only and args.resume_from is None:
         parser.error("--resume-failed-only requires --resume-from")
+    
+    if args.resume_from is not None:
+        if args.resume_from <= 0:
+            print("Error: Resume run ID must be a positive integer")
+            sys.exit(1)
 
     try:
         code = executioner.run(
