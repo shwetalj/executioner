@@ -1,0 +1,60 @@
+graph TB
+    subgraph "CLI Layer"
+        CLI[executioner.py<br/>CLI Entry Point]
+    end
+    
+    subgraph "Core Orchestration"
+        JE[JobExecutioner<br/>Main Coordinator]
+        EO[ExecutionOrchestrator<br/>Flow Control]
+    end
+    
+    subgraph "State Management"
+        QM[QueueManager<br/>Job Queuing]
+        SM[StateManager<br/>Run Lifecycle]
+        EHM[ExecutionHistoryManager<br/>Persistence]
+    end
+    
+    subgraph "Job Processing"
+        JR[JobRunner<br/>Individual Execution]
+        DM[DependencyManager<br/>Dependencies]
+        CR[CheckRunner<br/>Validations]
+    end
+    
+    subgraph "Support Systems"
+        NM[NotificationManager<br/>Alerts]
+        SR[SummaryReporter<br/>Output Display]
+        LS[LoggingSetup<br/>Logging Config]
+    end
+    
+    subgraph "Configuration"
+        CL[Config Loader<br/>JSON Processing]
+        CV[Config Validator<br/>Schema Validation]
+    end
+    
+    subgraph "Database"
+        SC[SQLite Connection<br/>Database Access]
+        DB[(SQLite Database<br/>Job History & Runs)]
+    end
+    
+    CLI --> JE
+    JE --> EO
+    JE --> QM
+    JE --> SM
+    JE --> SR
+    EO --> JR
+    QM --> DM
+    SM --> EHM
+    JR --> CR
+    JE --> NM
+    EHM --> SC
+    SC --> DB
+    JE --> CL
+    CL --> CV
+    
+    style CLI fill:#e1f5fe
+    style JE fill:#f3e5f5
+    style EO fill:#e8f5e8
+    style QM fill:#fff3e0
+    style SM fill:#fff3e0
+    style JR fill:#e8f5e8
+    style DB fill:#ffebee

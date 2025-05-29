@@ -1,0 +1,32 @@
+sequenceDiagram
+    participant EO as ExecutionOrchestrator
+    participant SM as StateManager
+    participant EHM as ExecutionHistoryManager
+    participant SC as SQLiteConnection
+    participant DB as Database
+    
+    Note over EO,DB: Run Initialization
+    EO->>SM: start_execution()
+    SM->>EHM: get_new_run_id()
+    EHM->>SC: db_connection()
+    SC->>DB: SELECT MAX(run_id)
+    DB-->>SC: Return max ID
+    SC-->>EHM: Connection closed
+    EHM-->>SM: Return new run_id
+    
+    SM->>EHM: create_run_summary()
+    EHM->>SC: db_connection()
+    SC->>DB: INSERT INTO run_summary
+    SC-->>EHM: Connection closed
+    
+    Note over EO,DB: Job Execution
+    EO->>EHM: update_job_status()
+    EHM->>SC: db_connection()
+    SC->>DB: INSERT INTO job_history
+    SC-->>EHM: Connection closed
+    
+    Note over EO,DB: Run Completion
+    SM->>EHM: update_run_summary()
+    EHM->>SC: db_connection()
+    SC->>DB: UPDATE run_summary
+    SC-->>EHM: Connection closed

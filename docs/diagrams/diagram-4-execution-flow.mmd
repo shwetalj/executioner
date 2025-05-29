@@ -1,0 +1,49 @@
+flowchart TD
+    Start([Start]) --> LoadConfig[Load Configuration]
+    LoadConfig --> Validate[Validate Config]
+    Validate --> InitComponents[Initialize Components]
+    
+    InitComponents --> GetRunID[Get New Run ID]
+    GetRunID --> SetupLogging[Setup Logging]
+    SetupLogging --> CheckDeps{Check Dependencies}
+    
+    CheckDeps -->|Circular Deps| AbortCircular[Abort: Circular Dependencies]
+    CheckDeps -->|Missing Deps| AbortMissing[Abort: Missing Dependencies]
+    CheckDeps -->|Valid| IsDryRun{Dry Run Mode?}
+    
+    IsDryRun -->|Yes| DisplayPlan[Display Execution Plan]
+    DisplayPlan --> ExitDry[Exit with Plan]
+    
+    IsDryRun -->|No| QueueJobs[Queue Initial Jobs]
+    QueueJobs --> SetupHandler[Setup Interrupt Handler]
+    SetupHandler --> IsParallel{Parallel Mode?}
+    
+    IsParallel -->|Yes| ParallelExec[Parallel Execution<br/>ThreadPoolExecutor]
+    IsParallel -->|No| SequentialExec[Sequential Execution<br/>Queue Processing]
+    
+    ParallelExec --> Monitor[Monitor Job Progress]
+    SequentialExec --> Monitor
+    
+    Monitor --> AllComplete{All Jobs Complete?}
+    AllComplete -->|No| GetNext[Get Next Job]
+    GetNext --> ExecuteJob[Execute Job]
+    ExecuteJob --> UpdateStatus[Update Job Status]
+    UpdateStatus --> QueueDeps[Queue Dependent Jobs]
+    QueueDeps --> AllComplete
+    
+    AllComplete -->|Yes| Cleanup[Cleanup Resources]
+    Cleanup --> GenerateSummary[Generate Summary]
+    GenerateSummary --> SendNotifications[Send Notifications]
+    SendNotifications --> End([End])
+    
+    AbortCircular --> End
+    AbortMissing --> End
+    ExitDry --> End
+    
+    style Start fill:#e8f5e8
+    style End fill:#ffebee
+    style AbortCircular fill:#ffcdd2
+    style AbortMissing fill:#ffcdd2
+    style IsDryRun fill:#fff3e0
+    style IsParallel fill:#fff3e0
+    style AllComplete fill:#fff3e0

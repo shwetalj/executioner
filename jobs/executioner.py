@@ -575,4 +575,3 @@ class JobExecutioner:
             return any('@' in str(addr) for addr in self.email_address)
         return False
 
-# ... existing code ... 

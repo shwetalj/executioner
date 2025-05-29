@@ -1,0 +1,37 @@
+stateDiagram-v2
+    [*] --> Pending: Job Created
+    
+    Pending --> Queued: Dependencies Met
+    Pending --> Blocked: Dependencies Not Met
+    
+    Blocked --> Queued: Dependencies Resolved
+    Blocked --> Skipped: Dependency Failed
+    
+    Queued --> Running: Job Started
+    
+    Running --> PreChecks: Execute Pre-checks
+    PreChecks --> PreCheckFailed: Pre-check Failed
+    PreChecks --> Executing: Pre-checks Passed
+    
+    Executing --> PostChecks: Command Completed
+    Executing --> Failed: Command Failed
+    Executing --> Timeout: Timeout Reached
+    
+    PostChecks --> Success: Post-checks Passed
+    PostChecks --> PostCheckFailed: Post-check Failed
+    
+    Failed --> Retrying: Retry Conditions Met
+    Timeout --> Retrying: Retry Conditions Met
+    PreCheckFailed --> Retrying: Retry Conditions Met
+    PostCheckFailed --> Retrying: Retry Conditions Met
+    
+    Retrying --> Running: Retry Attempt
+    Retrying --> Failed: Max Retries Exceeded
+    
+    Success --> [*]: Job Complete
+    Failed --> [*]: Job Complete
+    Skipped --> [*]: Job Complete
+    
+    note right of Success: Dependent jobs queued
+    note right of Failed: May block dependents
+    note right of Skipped: Dependents may be skipped

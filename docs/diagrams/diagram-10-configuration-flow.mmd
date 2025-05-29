@@ -1,0 +1,43 @@
+flowchart TD
+    Start([Configuration Start]) --> ReadFile[Read JSON Config File]
+    ReadFile --> ParseJSON{Valid JSON?}
+    
+    ParseJSON -->|No| JSONError[JSON Parse Error]
+    ParseJSON -->|Yes| ValidateSchema[Validate Schema]
+    
+    ValidateSchema --> CheckRequired{Required Fields<br/>Present?}
+    CheckRequired -->|No| RequiredError[Missing Required Fields]
+    CheckRequired -->|Yes| ValidateJobs[Validate Jobs Array]
+    
+    ValidateJobs --> JobLoop{For Each Job}
+    JobLoop --> CheckJobID{Job ID<br/>Present?}
+    CheckJobID -->|No| JobIDError[Missing Job ID]
+    CheckJobID -->|Yes| CheckCommand{Command<br/>Present?}
+    
+    CheckCommand -->|No| CommandError[Missing Command]
+    CheckCommand -->|Yes| ValidateDeps[Validate Dependencies]
+    
+    ValidateDeps --> DepsExist{Dependencies<br/>Exist?}
+    DepsExist -->|No| DepsError[Invalid Dependencies]
+    DepsExist -->|Yes| NextJob{More Jobs?}
+    
+    NextJob -->|Yes| JobLoop
+    NextJob -->|No| CheckCircular[Check Circular Dependencies]
+    
+    CheckCircular --> Circular{Circular<br/>Dependencies?}
+    Circular -->|Yes| CircularError[Circular Dependency Error]
+    Circular -->|No| ConfigValid[Configuration Valid]
+    
+    JSONError --> ConfigError[Configuration Error]
+    RequiredError --> ConfigError
+    JobIDError --> ConfigError
+    CommandError --> ConfigError
+    DepsError --> ConfigError
+    CircularError --> ConfigError
+    
+    ConfigValid --> Success([Configuration Success])
+    ConfigError --> Failure([Configuration Failure])
+    
+    style Success fill:#c8e6c9
+    style Failure fill:#ffcdd2
+    style ConfigError fill:#ffcdd2

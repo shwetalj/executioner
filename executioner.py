@@ -164,54 +164,17 @@ Configuration Options:
 
 def main():
     epilog_text = """
-Key Features:
-• Dependency-based job orchestration
-• Parallel and sequential execution modes
-• Comprehensive retry mechanisms with backoff
-• Environment variable management and isolation
-• Pre/post job validation checks
-• Resume capability for failed runs
-• Email notifications on success/failure
-• Detailed logging and execution history
-• Dry-run mode for validation
-• Security controls for command execution
-
-Configuration Features:
-• Environment variable interpolation: Use ${VAR} syntax in config
-• Shell environment isolation: Set 'inherit_shell_env' in config:
-  - true: inherit all (default)
-  - false: complete isolation
-  - "default": common system vars only
-  - ["PATH", "HOME"]: custom whitelist
-• Security: Set 'security_policy: strict' to block unsafe commands
-• Retry configuration with backoff, jitter, and exit code matching
-• Pre/post job checks for validation
-• Custom dependency plugins support
-
-Notes:
-• Default config file: jobs_config.json (if -c not specified)
-• Environment variable precedence: CLI > job-level > application-level
-• CLI env formats: --env KEY=VAL or --env KEY1=val1,KEY2=val2
-• Multiple --env arguments can be used: --env A=1 --env B=2
-• Logs stored in ./logs/ (or config 'log_dir') with rotation
-• Use --dry-run to validate config and see execution plan
-• See ENV_ISOLATION_DOCS.md for environment variable details
-
 Examples:
-  %(prog)s -c jobs_config.json
-  %(prog)s -c jobs_config.json --continue-on-error
-  %(prog)s -c jobs_config.json --dry-run
-  %(prog)s -c jobs_config.json --skip job1,job2,job3  # Comma-separated
-  %(prog)s -c jobs_config.json --skip job1 --skip job2  # Multiple --skip
-  %(prog)s -c jobs_config.json --env KEY1=value1,KEY2=value2  # Comma-separated
-  %(prog)s -c jobs_config.json --env DB=prod --env LOG_LEVEL=debug  # Multiple --env
-  %(prog)s -c jobs_config.json --parallel --workers 4
-  %(prog)s -c jobs_config.json --resume-from 123
-  %(prog)s -c jobs_config.json --resume-from 123 --resume-failed-only
-  %(prog)s --sample-config        # Shows sample configuration format
-  %(prog)s --list-runs           # Show recent execution history
-  %(prog)s --show-run 123        # Show detailed status for run 123
-  %(prog)s --mark-success -r 123 -j job1,job2  # Mark jobs as successful
+  %(prog)s -c jobs_config.json                    # Basic execution
+  %(prog)s -c jobs_config.json --dry-run          # Validate without running
+  %(prog)s -c jobs_config.json --parallel         # Parallel execution
+  %(prog)s -c jobs_config.json --skip job1,job2   # Skip specific jobs
+  %(prog)s --resume-from 123                      # Resume from run 123
+  %(prog)s --list-runs                            # Show execution history
+  %(prog)s --sample-config                        # Show config example
+
+For detailed documentation, configuration options, and advanced features:
+See README.md and docs/ directory in the project repository.
 """
     parser = argparse.ArgumentParser(
         description="Executioner - A robust job execution engine with dependency management, parallel execution, and retry capabilities",

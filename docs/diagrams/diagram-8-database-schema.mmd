@@ -1,0 +1,43 @@
+erDiagram
+    RUN_SUMMARY {
+        INTEGER run_id PK
+        TEXT application_name
+        TEXT start_time
+        TEXT end_time
+        TEXT status
+        INTEGER total_jobs
+        INTEGER completed_jobs
+        INTEGER failed_jobs
+        INTEGER skipped_jobs
+        INTEGER exit_code
+    }
+    
+    JOB_HISTORY {
+        INTEGER id PK
+        TEXT run_id FK
+        TEXT application_name
+        TEXT job_id
+        TEXT status
+        TEXT start_time
+        TEXT end_time
+        TEXT command
+        TEXT exit_code
+        TEXT retry_count
+        TEXT log_file
+    }
+    
+    RETRY_HISTORY {
+        INTEGER id PK
+        TEXT run_id FK
+        TEXT job_id FK
+        TEXT attempt_number
+        TEXT timestamp
+        TEXT duration
+        TEXT success
+        TEXT exit_code
+        TEXT status
+    }
+    
+    RUN_SUMMARY ||--o{ JOB_HISTORY : "has jobs"
+    RUN_SUMMARY ||--o{ RETRY_HISTORY : "has retries"
+    JOB_HISTORY ||--o{ RETRY_HISTORY : "has retry attempts"

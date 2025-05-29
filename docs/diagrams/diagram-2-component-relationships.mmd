@@ -1,0 +1,38 @@
+graph LR
+    subgraph "Execution Control"
+        JE[JobExecutioner]
+        EO[ExecutionOrchestrator]
+        JE --> EO
+    end
+    
+    subgraph "Job Management"
+        QM[QueueManager]
+        JR[JobRunner]
+        DM[DependencyManager]
+        QM --> JR
+        QM --> DM
+    end
+    
+    subgraph "State & History"
+        SM[StateManager]
+        EHM[ExecutionHistoryManager]
+        SM --> EHM
+    end
+    
+    subgraph "Reporting"
+        SR[SummaryReporter]
+        NM[NotificationManager]
+    end
+    
+    JE --> QM
+    JE --> SM
+    JE --> SR
+    JE --> NM
+    EO --> QM
+    EO --> SM
+    
+    style JE fill:#f3e5f5
+    style EO fill:#e8f5e8
+    style QM fill:#fff3e0
+    style JR fill:#e8f5e8
+    style SM fill:#fff3e0

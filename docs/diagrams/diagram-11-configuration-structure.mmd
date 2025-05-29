@@ -1,0 +1,39 @@
+graph TB
+    subgraph "Root Configuration"
+        Config[JSON Config File]
+        Config --> AppName[application_name]
+        Config --> Jobs[jobs[]]
+        Config --> Settings[Global Settings]
+    end
+    
+    subgraph "Global Settings"
+        Settings --> Parallel[parallel: bool]
+        Settings --> MaxWorkers[max_workers: int]
+        Settings --> Timeout[default_timeout: int]
+        Settings --> Email[email_settings{}]
+        Settings --> Env[env_variables{}]
+    end
+    
+    subgraph "Job Configuration"
+        Jobs --> Job1[Job Object]
+        Job1 --> JobID[id: string]
+        Job1 --> JobCmd[command: string]
+        Job1 --> JobDeps[dependencies: array]
+        Job1 --> JobEnv[env_variables: object]
+        Job1 --> JobTimeout[timeout: int]
+        Job1 --> JobRetry[retry_settings: object]
+        Job1 --> JobChecks[pre/post_checks: array]
+    end
+    
+    subgraph "Validation Rules"
+        Rules[Validation Rules]
+        Rules --> UniqueIDs[Unique Job IDs]
+        Rules --> ValidDeps[Valid Dependencies]
+        Rules --> NoCircular[No Circular Dependencies]
+        Rules --> ValidCommands[Non-empty Commands]
+    end
+    
+    style Config fill:#e1f5fe
+    style Settings fill:#f3e5f5
+    style Jobs fill:#e8f5e8
+    style Rules fill:#fff3e0

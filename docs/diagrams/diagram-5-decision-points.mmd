@@ -1,0 +1,43 @@
+graph TD
+    subgraph "Pre-Execution Validation"
+        A[Start] --> B[Load Config]
+        B --> C{Valid Config?}
+        C -->|No| D[Exit with Error]
+        C -->|Yes| E{Circular Dependencies?}
+        E -->|Yes| F[Exit with Error]
+        E -->|No| G{Missing Dependencies?}
+        G -->|Yes| H[Exit with Error]
+    end
+    
+    subgraph "Execution Mode Selection"
+        G -->|No| I{Dry Run?}
+        I -->|Yes| J[Display Plan & Exit]
+        I -->|No| K{Parallel Mode?}
+        K -->|Yes| L[Parallel Execution]
+        K -->|No| M[Sequential Execution]
+    end
+    
+    subgraph "Job Processing Loop"
+        L --> N{Jobs Remaining?}
+        M --> N
+        N -->|Yes| O[Execute Next Job]
+        O --> P{Job Success?}
+        P -->|Yes| Q[Queue Dependent Jobs]
+        P -->|No| R[Handle Failure]
+        Q --> N
+        R --> S{Continue on Error?}
+        S -->|Yes| N
+        S -->|No| T[Abort Execution]
+    end
+    
+    subgraph "Completion"
+        N -->|No| U[Generate Summary]
+        T --> U
+        U --> V[Send Notifications]
+        V --> W[End]
+    end
+    
+    style D fill:#ffcdd2
+    style F fill:#ffcdd2
+    style H fill:#ffcdd2
+    style T fill:#ffcdd2

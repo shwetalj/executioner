@@ -1,0 +1,34 @@
+sequenceDiagram
+    participant CLI as executioner.py
+    participant JE as JobExecutioner
+    participant EO as ExecutionOrchestrator
+    participant QM as QueueManager
+    participant SM as StateManager
+    participant JR as JobRunner
+    participant EHM as ExecutionHistoryManager
+    participant DB as SQLite Database
+    
+    CLI->>JE: Initialize with config
+    JE->>SM: Initialize state & get run ID
+    SM->>EHM: Get new run ID
+    EHM->>DB: Query max run ID
+    DB-->>EHM: Return max ID
+    EHM-->>SM: Return new run ID
+    
+    JE->>QM: Initialize job queue
+    QM->>QM: Queue initial jobs
+    
+    JE->>EO: Start execution
+    EO->>QM: Get next job
+    QM-->>EO: Return job ID
+    
+    EO->>JR: Execute job
+    JR->>JR: Run command & monitor
+    JR-->>EO: Return result
+    
+    EO->>QM: Mark job complete
+    QM->>QM: Queue dependent jobs
+    
+    EO->>SM: Update execution state
+    SM->>EHM: Record job status
+    EHM->>DB: Persist to database

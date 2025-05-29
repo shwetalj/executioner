@@ -1,0 +1,43 @@
+flowchart TD
+    Start([Job Start]) --> Setup[Setup Job Environment]
+    Setup --> PreCheck{Pre-checks<br/>Required?}
+    
+    PreCheck -->|Yes| RunPreCheck[Execute Pre-checks]
+    PreCheck -->|No| RunCommand[Execute Command]
+    
+    RunPreCheck --> PreCheckResult{Pre-checks<br/>Pass?}
+    PreCheckResult -->|No| PreCheckFail[Mark Pre-check Failed]
+    PreCheckResult -->|Yes| RunCommand
+    
+    RunCommand --> Monitor[Monitor Execution]
+    Monitor --> CommandResult{Command<br/>Success?}
+    
+    CommandResult -->|Timeout| TimeoutHandle[Handle Timeout]
+    CommandResult -->|Error| ErrorHandle[Handle Error]
+    CommandResult -->|Success| PostCheck{Post-checks<br/>Required?}
+    
+    PostCheck -->|No| Success[Mark Success]
+    PostCheck -->|Yes| RunPostCheck[Execute Post-checks]
+    
+    RunPostCheck --> PostCheckResult{Post-checks<br/>Pass?}
+    PostCheckResult -->|No| PostCheckFail[Mark Post-check Failed]
+    PostCheckResult -->|Yes| Success
+    
+    TimeoutHandle --> RetryCheck{Retry<br/>Available?}
+    ErrorHandle --> RetryCheck
+    PreCheckFail --> RetryCheck
+    PostCheckFail --> RetryCheck
+    
+    RetryCheck -->|Yes| Delay[Wait Retry Delay]
+    RetryCheck -->|No| Failed[Mark Failed]
+    
+    Delay --> RunCommand
+    
+    Success --> QueueDeps[Queue Dependent Jobs]
+    Failed --> End([Job End])
+    QueueDeps --> End
+    
+    style Success fill:#c8e6c9
+    style Failed fill:#ffcdd2
+    style TimeoutHandle fill:#fff3e0
+    style ErrorHandle fill:#fff3e0
