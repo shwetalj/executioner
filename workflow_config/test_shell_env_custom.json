@@ -1,0 +1,14 @@
+{
+  "application_name": "test_shell_custom",
+  "inherit_shell_env": ["PATH", "USER"],
+  "env_variables": {
+    "MY_APP_VAR": "app_value"
+  },
+  "jobs": [
+    {
+      "id": "test_custom",
+      "description": "Test custom whitelist inheritance",
+      "command": "echo '=== Inherited Vars ===' && echo PATH=$PATH && echo USER=$USER && echo '=== Not Inherited ===' && echo HOME=$HOME && echo SHELL=$SHELL"
+    }
+  ]
+}

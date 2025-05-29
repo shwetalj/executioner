@@ -1,4 +1,40 @@
 import re
+import os
+
+# Default environment variables to inherit from shell
+DEFAULT_INHERIT_ENV = [
+    # Essential system paths
+    "PATH",
+    "LD_LIBRARY_PATH",
+    
+    # User and system info
+    "HOME",
+    "USER",
+    "SHELL",
+    "HOSTNAME",
+    
+    # Terminal and display
+    "TERM",
+    "DISPLAY",
+    
+    # Locale settings
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    
+    # Timezone
+    "TZ",
+    
+    # Temporary directories
+    "TMPDIR",
+    "TEMP",
+    "TMP",
+    
+    # Common tool paths (but not credentials)
+    "JAVA_HOME",
+    "PYTHON_HOME",
+    "NODE_PATH"
+]
 
 def parse_env_vars(env_list, debug=False):
     """Parse KEY=value environment variables. Supports both repeated and comma-separated formats."""
@@ -149,4 +185,49 @@ def validate_env_vars(env_vars, logger=None):
         if len(str_value) > 32768:  # 32KB limit
             errors.append(f"Environment variable '{key}' value exceeds 32KB")
     
-    return len(errors) == 0, errors 
+    return len(errors) == 0, errors
+
+def filter_shell_env(inherit_shell_env, logger=None):
+    """
+    Filter shell environment variables based on inherit_shell_env setting.
+    
+    Args:
+        inherit_shell_env: Can be:
+            - True: inherit all environment variables
+            - False: inherit no environment variables
+            - "default": use DEFAULT_INHERIT_ENV list
+            - list: inherit only specified variables
+        logger: Optional logger for debugging
+    
+    Returns:
+        dict: Filtered environment variables
+    """
+    if inherit_shell_env is True:
+        # Inherit all environment variables
+        if logger:
+            logger.debug("Inheriting all shell environment variables")
+        return dict(os.environ)
+    
+    elif inherit_shell_env is False:
+        # Don't inherit any environment variables
+        if logger:
+            logger.debug("Not inheriting any shell environment variables")
+        return {}
+    
+    elif inherit_shell_env == "default":
+        # Use default whitelist
+        if logger:
+            logger.debug(f"Inheriting default shell environment variables: {DEFAULT_INHERIT_ENV}")
+        return {k: v for k, v in os.environ.items() if k in DEFAULT_INHERIT_ENV}
+    
+    elif isinstance(inherit_shell_env, list):
+        # Use custom whitelist
+        if logger:
+            logger.debug(f"Inheriting specified shell environment variables: {inherit_shell_env}")
+        return {k: v for k, v in os.environ.items() if k in inherit_shell_env}
+    
+    else:
+        # Invalid type, log error and default to "default" behavior
+        if logger:
+            logger.warning(f"Invalid inherit_shell_env value: {inherit_shell_env}. Using default.")
+        return {k: v for k, v in os.environ.items() if k in DEFAULT_INHERIT_ENV} 

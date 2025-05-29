@@ -63,11 +63,18 @@ SAMPLE_CONFIG = """{
     "parallel": true,
     "max_workers": 3,
     "allow_shell": true,
+    "inherit_shell_env": "default",
     "env_variables": {
         "APP_ENV": "production",
         "LOG_LEVEL": "info",
-        "DATA_DIR": "/data"
+        "DATA_DIR": "/data",
+        "BASE_PATH": "/opt/pipeline",
+        "CONFIG_PATH": "${BASE_PATH}/config",
+        "OUTPUT_PATH": "${BASE_PATH}/output"
     },
+    "dependency_plugins": [],
+    "security_policy": "warn",
+    "log_dir": "./logs",
     "jobs": [
         {
             "id": "download_data",
@@ -76,7 +83,7 @@ SAMPLE_CONFIG = """{
             "timeout": 300,
             "env_variables": {
                 "API_KEY": "your-api-key",
-                "DOWNLOAD_PATH": "/data/raw"
+                "DOWNLOAD_PATH": "${DATA_DIR}/raw"
             },
             "pre_checks": [
                 {"name": "check_file_exists", "params": {"path": "/data/raw"}}
@@ -99,7 +106,9 @@ SAMPLE_CONFIG = """{
             "dependencies": ["download_data"],
             "timeout": 600,
             "env_variables": {
-                "DEBUG": "true"
+                "DEBUG": "true",
+                "INPUT_PATH": "${DATA_DIR}/raw",
+                "OUTPUT_PATH": "${DATA_DIR}/clean"
             },
             "pre_checks": [
                 {"name": "check_file_exists", "params": {"path": "/data/raw"}}
@@ -111,14 +120,29 @@ SAMPLE_CONFIG = """{
         {
             "id": "generate_report",
             "description": "Generate report",
-            "command": "python generate_report.py",
+            "command": "python generate_report.py --output ${OUTPUT_PATH}/report.pdf",
             "dependencies": ["clean_data"],
             "timeout": 900,
+            "env_variables": {
+                "REPORT_FORMAT": "pdf",
+                "DATA_PATH": "${DATA_DIR}/clean"
+            },
             "pre_checks": [],
             "post_checks": []
         }
     ]
-}"""
+}
+
+Configuration Options:
+- inherit_shell_env: Control environment inheritance
+  - true: inherit all shell variables (backward compatible)
+  - false: complete isolation
+  - "default": inherit common system variables only
+  - ["PATH", "HOME", ...]: custom whitelist
+- Environment variables support interpolation: ${VAR_NAME}
+- security_policy: "strict" to block potentially unsafe commands
+- dependency_plugins: List of Python modules for custom dependencies
+- See ENV_ISOLATION_DOCS.md for detailed environment variable documentation"""
 
 def main():
     epilog_text = """

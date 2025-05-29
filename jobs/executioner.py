@@ -37,7 +37,7 @@ from jobs.dependency_manager import DependencyManager
 
 from jobs.notification_manager import NotificationManager
 from jobs.command_utils import validate_command, parse_command
-from jobs.env_utils import merge_env_vars, interpolate_env_vars
+from jobs.env_utils import merge_env_vars, interpolate_env_vars, filter_shell_env
 
 class JobExecutioner:
     def __init__(self, config_file: str):
@@ -121,6 +121,10 @@ class JobExecutioner:
         # Interpolate application-level environment variables
         self.app_env_variables = interpolate_env_vars(self.app_env_variables, self.logger)
         self.cli_env_variables = {}  # Will be set by main executioner
+        
+        # Shell environment inheritance setting (default to True for backward compatibility)
+        self.inherit_shell_env = self.config.get("inherit_shell_env", True)
+        self.shell_env = filter_shell_env(self.inherit_shell_env, self.logger)
         
         # Handle dependency plugins if specified
         self.dependency_plugins = self.config.get("dependency_plugins", [])
@@ -231,7 +235,8 @@ class JobExecutioner:
             merged_env = merge_env_vars(merged_env, self.cli_env_variables)
             # Interpolate variables after merging so job vars can reference app/CLI vars
             merged_env = interpolate_env_vars(merged_env, job_logger)
-            modified_env = os.environ.copy()
+            # Start with filtered shell environment instead of full os.environ
+            modified_env = self.shell_env.copy()
             modified_env.update(merged_env)
             env_var_sources = []
             if self.app_env_variables:
@@ -382,7 +387,8 @@ class JobExecutioner:
             update_retry_history=self.job_history.update_retry_history,
             get_last_exit_code=self.job_history.get_last_exit_code,
             setup_job_logger=self._setup_job_logger,
-            cli_env=self.cli_env_variables
+            cli_env=self.cli_env_variables,
+            shell_env=self.shell_env
         )
         runner.job_history = self.job_history
         result, fail_reason = runner.run(dry_run=self.dry_run, continue_on_error=self.continue_on_error, return_reason=True)

@@ -16,11 +16,12 @@ EXIT_CODE_TIMEOUT = -1  # Process timed out and was killed
 EXIT_CODE_EXCEPTION = -2  # Exception occurred during execution
 
 class JobRunner(JobStatusMixin):
-    def __init__(self, job_id: str, job_config: dict, global_env: dict, main_logger, config: dict, run_id: int, app_name: str, db_connection, validate_timeout, update_job_status, update_retry_history, get_last_exit_code, setup_job_logger, cli_env=None):
+    def __init__(self, job_id: str, job_config: dict, global_env: dict, main_logger, config: dict, run_id: int, app_name: str, db_connection, validate_timeout, update_job_status, update_retry_history, get_last_exit_code, setup_job_logger, cli_env=None, shell_env=None):
         self.job_id = job_id
         self.job = job_config
         self.global_env = global_env
         self.cli_env = cli_env or {}
+        self.shell_env = shell_env if shell_env is not None else dict(os.environ)  # Default to full environ for backward compatibility
         self.main_logger = main_logger  # Main logger for user-facing output
         self.config = config
         self.run_id = run_id
@@ -223,7 +224,8 @@ class JobRunner(JobStatusMixin):
         merged_env = merge_env_vars(merged_env, self.cli_env)
         # Interpolate variables after merging so job vars can reference app/CLI vars
         merged_env = interpolate_env_vars(merged_env, job_logger)
-        env = os.environ.copy()
+        # Start with filtered shell environment instead of full os.environ
+        env = self.shell_env.copy()
         env.update(merged_env)
         process = subprocess.Popen(
             command,

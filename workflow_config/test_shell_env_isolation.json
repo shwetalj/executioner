@@ -1,0 +1,14 @@
+{
+  "application_name": "test_shell_isolation",
+  "inherit_shell_env": false,
+  "env_variables": {
+    "MY_APP_VAR": "app_value"
+  },
+  "jobs": [
+    {
+      "id": "test_isolation",
+      "description": "Test that shell variables are not inherited",
+      "command": "echo '=== Environment Variables ===' && env | sort"
+    }
+  ]
+}

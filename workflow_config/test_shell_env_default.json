@@ -1,0 +1,14 @@
+{
+  "application_name": "test_shell_default",
+  "inherit_shell_env": "default",
+  "env_variables": {
+    "MY_APP_VAR": "app_value"
+  },
+  "jobs": [
+    {
+      "id": "test_default",
+      "description": "Test default whitelist inheritance",
+      "command": "echo '=== Path Variables ===' && echo PATH=$PATH && echo HOME=$HOME && echo '=== All Env ===' && env | wc -l"
+    }
+  ]
+}

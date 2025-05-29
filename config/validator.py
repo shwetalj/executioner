@@ -18,6 +18,25 @@ def validate_config(config, logger):
                     logger.error(f"Application env_variables: {error}")
                 raise ValueError("Invalid application-level environment variables")
         
+        # Validate inherit_shell_env setting
+        if "inherit_shell_env" in config:
+            inherit_setting = config["inherit_shell_env"]
+            valid_types = (bool, str, list)
+            
+            if not isinstance(inherit_setting, valid_types):
+                logger.error(f"inherit_shell_env must be boolean, string ('default'), or list of strings")
+                raise TypeError("Invalid inherit_shell_env type")
+            
+            if isinstance(inherit_setting, str) and inherit_setting != "default":
+                logger.error(f"inherit_shell_env string value must be 'default', got '{inherit_setting}'")
+                raise ValueError("Invalid inherit_shell_env string value")
+            
+            if isinstance(inherit_setting, list):
+                for item in inherit_setting:
+                    if not isinstance(item, str):
+                        logger.error(f"inherit_shell_env list must contain only strings")
+                        raise TypeError("Invalid inherit_shell_env list item type")
+        
         # Check for duplicate job IDs
         job_ids = []
         for job in config["jobs"]:
