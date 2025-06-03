@@ -62,6 +62,38 @@ def parse_skip_jobs(skip_list):
             unique_ids.append(job_id)
     return unique_ids
 
+SIMPLE_CONFIG = """{
+    "application_name": "my_pipeline",
+    "jobs": [
+        {
+            "id": "job1",
+            "description": "First job - downloads data",
+            "command": "python download_data.py"
+        },
+        {
+            "id": "job2", 
+            "description": "Second job - processes data",
+            "command": "python process_data.py",
+            "dependencies": ["job1"]
+        },
+        {
+            "id": "job3",
+            "description": "Third job - generates report",
+            "command": "python generate_report.py",
+            "dependencies": ["job2"]
+        }
+    ]
+}
+
+This minimal configuration will:
+- Run three jobs in sequence (job1 -> job2 -> job3)
+- Use default timeout of 3 hours per job
+- Send email notifications on failure (if SMTP is configured)
+- Log output to ./logs directory
+
+For more features like parallel execution, retries, and environment variables,
+use --sample-config to see a comprehensive example."""
+
 SAMPLE_CONFIG = """{
     "application_name": "data_pipeline",
     "default_timeout": 10800,
@@ -171,7 +203,16 @@ Examples:
   %(prog)s -c jobs_config.json --skip job1,job2   # Skip specific jobs
   %(prog)s --resume-from 123                      # Resume from run 123
   %(prog)s --list-runs                            # Show execution history
-  %(prog)s --sample-config                        # Show config example
+  %(prog)s --simple-config                        # Show simple config for beginners
+  %(prog)s --sample-config                        # Show comprehensive config example
+
+Advanced Configuration Features (use --sample-config to see all options):
+  - Security policies and command whitelisting
+  - Retry configuration with backoff, jitter, and exit codes
+  - Environment variable interpolation (${VAR_NAME} syntax)
+  - Pre/post job validation checks
+  - Custom dependency plugins
+  - Per-job configuration overrides
 
 For detailed documentation, configuration options, and advanced features:
 See README.md and docs/ directory in the project repository.
@@ -183,7 +224,8 @@ See README.md and docs/ directory in the project repository.
     )
     # Basic configuration
     parser.add_argument("-c", "--config", default="jobs_config.json", help="Path to job configuration file (default: jobs_config.json)")
-    parser.add_argument("--sample-config", action="store_true", help="Display a sample configuration file and exit")
+    parser.add_argument("--simple-config", action="store_true", help="Display a simple, minimal configuration example for getting started")
+    parser.add_argument("--sample-config", action="store_true", help="Display a sample configuration file with all available options including security policies, retry settings, environment variables, and more")
     
     # Execution control options
     execution_group = parser.add_argument_group("Execution control")
@@ -237,6 +279,15 @@ See README.md and docs/ directory in the project repository.
 
     # Set up root logger and propagate to all loggers
     logging.basicConfig(level=logging_level)
+
+    # Handle --simple-config flag
+    if args.simple_config:
+        divider = "=" * 80
+        print(f"\n{divider}")
+        print(f"{'SIMPLE CONFIGURATION EXAMPLE':^80}")
+        print(f"{divider}")
+        print(SIMPLE_CONFIG)
+        sys.exit(0)
 
     # Handle --sample-config flag
     if args.sample_config:
