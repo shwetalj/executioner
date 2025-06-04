@@ -80,9 +80,11 @@ class JobRunner(JobStatusMixin):
             # Pre-checks
             pre_checks = self.job.get("pre_checks", [])
             if pre_checks:
+                pre_check_start = datetime.datetime.now()
                 if not run_checks(pre_checks, job_logger, phase="pre", job_id=self.job_id):
                     self.main_logger.error(f"Pre-checks failed for job {self.job_id}. Skipping job execution.")
-                    self.mark_failed(self.job_id, "PRECHECK_FAILED")
+                    pre_check_duration = (datetime.datetime.now() - pre_check_start).total_seconds()
+                    self.mark_failed(self.job_id, "PRECHECK_FAILED", duration=pre_check_duration, start_time=pre_check_start.strftime('%Y-%m-%d %H:%M:%S'))
                     fail_reason = f"Pre-check failed"
                     if return_reason:
                         return False, fail_reason
@@ -107,6 +109,7 @@ class JobRunner(JobStatusMixin):
                 
                 # Execute the job
                 attempt_start = time.time()
+                attempt_start_dt = datetime.datetime.now()
                 exit_code = None
                 try:
                     status = self._run_command(command, timeout, job_logger)
@@ -143,14 +146,14 @@ class JobRunner(JobStatusMixin):
                         else:
                             msg = f"Job '{self.job_id}' completed successfully in {duration:.2f} seconds"
                             self.main_logger.info(msg)
-                            self.mark_success(self.job_id)
+                            self.mark_success(self.job_id, duration=duration, start_time=attempt_start_dt.strftime('%Y-%m-%d %H:%M:%S'))
                             if return_reason:
                                 return True, None
                             return True
                     else:
                         msg = f"Job '{self.job_id}' completed successfully in {duration:.2f} seconds"
                         self.main_logger.info(msg)
-                        self.mark_success(self.job_id)
+                        self.mark_success(self.job_id, duration=duration, start_time=attempt_start_dt.strftime('%Y-%m-%d %H:%M:%S'))
                         if return_reason:
                             return True, None
                         return True
@@ -326,3 +329,4 @@ class JobRunner(JobStatusMixin):
                 job_logger.error(f"Error running {phase}-check {name}: {e}")
                 return False
         return True 
+

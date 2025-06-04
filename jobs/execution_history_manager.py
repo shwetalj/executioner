@@ -338,9 +338,12 @@ class ExecutionHistoryManager:
                         start_dt = datetime.fromisoformat(start_time.replace(' ', 'T'))
                         end_dt = datetime.fromisoformat(end_time.replace(' ', 'T'))
                         duration_td = end_dt - start_dt
-                        duration = str(duration_td).split('.')[0]
-                    except:
-                        pass
+                        hours, remainder = divmod(int(duration_td.total_seconds()), 3600)
+                        minutes, seconds = divmod(remainder, 60)
+                        duration = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+                    except Exception as e:
+                        self.logger.debug(f"Error calculating duration from run_summary: {e}")
+                        duration = 'N/A'
             else:
                 # Fallback to old method for backward compatibility
                 query = """
@@ -387,7 +390,8 @@ class ExecutionHistoryManager:
                         hours, remainder = divmod(int(duration_td.total_seconds()), 3600)
                         minutes, seconds = divmod(remainder, 60)
                         duration = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-                    except:
+                    except Exception as e:
+                        self.logger.debug(f"Error calculating duration from job_history: {e}")
                         duration = 'N/A'
             
             run_info = {
@@ -405,21 +409,35 @@ class ExecutionHistoryManager:
             
             # Get individual job details
             cursor.execute("""
-                SELECT id, description, command, status, last_run
+                SELECT id, description, command, status, last_run, duration_seconds
                 FROM job_history
                 WHERE run_id = ?
-                ORDER BY id
+                ORDER BY last_run
             """, (run_id,))
             
             jobs = []
             for job_row in cursor.fetchall():
-                job_id, description, command, job_status, last_run = job_row
+                job_id, description, command, job_status, last_run, duration_seconds = job_row
+                
+                # Calculate end time from start time and duration
+                end_time = None
+                if last_run and duration_seconds:
+                    try:
+                        from datetime import datetime, timedelta
+                        start_dt = datetime.fromisoformat(last_run.replace(' ', 'T'))
+                        end_dt = start_dt + timedelta(seconds=duration_seconds)
+                        end_time = end_dt.strftime('%Y-%m-%d %H:%M:%S')
+                    except:
+                        pass
+                
                 jobs.append({
                     'id': job_id,
                     'description': description or '',
                     'command': command or '',
                     'status': job_status,
-                    'last_run': last_run
+                    'last_run': last_run,
+                    'duration_seconds': duration_seconds,
+                    'end_time': end_time
                 })
             
             return {
@@ -427,7 +445,7 @@ class ExecutionHistoryManager:
                 'jobs': jobs
             }
 
-    def update_job_status(self, job_id, status):
+    def update_job_status(self, job_id, status, duration=None, start_time=None):
         job = self.jobs[job_id]
         self.job_status_batch.append((
             self.run_id,
@@ -435,7 +453,9 @@ class ExecutionHistoryManager:
             job.get("description", ""),
             job["command"],
             status,
-            self.application_name
+            self.application_name,
+            start_time,  # last_run timestamp
+            duration     # duration_seconds
         ))
 
     @handle_db_errors(lambda self: self.logger)
@@ -446,8 +466,8 @@ class ExecutionHistoryManager:
             cursor = conn.cursor()
             cursor.executemany("""
                 INSERT OR REPLACE INTO job_history
-                (run_id, id, description, command, status, application_name)
-                VALUES (?, ?, ?, ?, ?, ?)
+                (run_id, id, description, command, status, application_name, last_run, duration_seconds)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, self.job_status_batch)
             conn.commit()
         self.job_status_batch.clear()
@@ -575,3 +595,4 @@ class ExecutionHistoryManager:
             except sqlite3.OperationalError as e:
                 self.logger.debug(f"Error selecting last_exit_code: {e}")
             return None 
+

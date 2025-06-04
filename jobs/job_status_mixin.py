@@ -6,17 +6,17 @@ class JobStatusMixin:
       - self.logger
     """
 
-    def mark_success(self, job_id):
-        self.job_history.update_job_status(job_id, "SUCCESS")
+    def mark_success(self, job_id, duration=None, start_time=None):
+        self.job_history.update_job_status(job_id, "SUCCESS", duration=duration, start_time=start_time)
 
-    def mark_failed(self, job_id, reason=None):
-        self.job_history.update_job_status(job_id, "FAILED")
+    def mark_failed(self, job_id, reason=None, duration=None, start_time=None):
+        self.job_history.update_job_status(job_id, "FAILED", duration=duration, start_time=start_time)
 
-    def mark_error(self, job_id, reason=None):
-        self.job_history.update_job_status(job_id, "ERROR")
+    def mark_error(self, job_id, reason=None, duration=None, start_time=None):
+        self.job_history.update_job_status(job_id, "ERROR", duration=duration, start_time=start_time)
 
-    def mark_timeout(self, job_id):
-        self.job_history.update_job_status(job_id, "TIMEOUT")
+    def mark_timeout(self, job_id, duration=None, start_time=None):
+        self.job_history.update_job_status(job_id, "TIMEOUT", duration=duration, start_time=start_time)
 
     def mark_blocked(self, job_id, reason=None):
         self.job_history.update_job_status(job_id, "BLOCKED")
@@ -29,3 +29,4 @@ class JobStatusMixin:
         retry_on_status = job.get("retry_on_status", ["ERROR", "FAILED", "TIMEOUT"])
         max_retries = job.get("max_retries", 0)
         return last_status in retry_on_status and retry_count < max_retries 
+

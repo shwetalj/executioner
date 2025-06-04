@@ -393,10 +393,6 @@ See README.md and docs/ directory in the project repository.
         print(f"Duration: {run_info['duration']}")
         print(f"Total Jobs: {run_info['total_jobs']}")
         
-        # Display job details
-        print(f"\nJob Status Details:")
-        print("-" * 80)
-        
         jobs = run_details['jobs']
         
         # Group jobs by status
@@ -405,33 +401,47 @@ See README.md and docs/ directory in the project repository.
         skipped_jobs = [j for j in jobs if j['status'] == 'SKIPPED']
         other_jobs = [j for j in jobs if j['status'] not in ['SUCCESS', 'FAILED', 'ERROR', 'TIMEOUT', 'SKIPPED']]
         
-        # Display successful jobs
-        if successful_jobs:
-            print(f"\n✓ Successful Jobs ({len(successful_jobs)}):")
-            for job in successful_jobs:
-                print(f"  {job['id']:30} - {job['description']}")
+        print(f"Successful Jobs: {len(successful_jobs)}")
+        print(f"Failed Jobs: {len(failed_jobs)}")
+        print(f"Skipped Jobs: {len(skipped_jobs)}")
+        print(f"Main log: {os.path.abspath('./logs/executioner.' + run_info['application_name'] + '.run-' + str(args.show_run) + '.log')}")
         
-        # Display failed jobs with details
+        # Display job details in tabular format
+        print(f"\nJob Status Details:")
+        # Calculate table width: 30 + 3 + 8 + 3 + 19 + 3 + 19 + 3 + 8 = 96
+        table_width = 96
+        print("=" * table_width)
+        print(f"{'Job ID':30} | {'Status':8} | {'Start Time':19} | {'End Time':19} | {'Duration':>8}")
+        print("-" * table_width)
+        
+        # Display all jobs in tabular format (ordered by execution time)
+        for job in jobs:
+            # Format duration
+            duration_str = "N/A"
+            if job.get('duration_seconds') is not None:
+                seconds = int(job['duration_seconds'])
+                minutes, secs = divmod(seconds, 60)
+                hours, mins = divmod(minutes, 60)
+                duration_str = f"{hours:02d}:{mins:02d}:{secs:02d}"
+            
+            # Format times
+            start_time = job.get('last_run', 'N/A')[:19] if job.get('last_run') else 'N/A'
+            end_time = job.get('end_time', 'N/A')[:19] if job.get('end_time') else 'N/A'
+            
+            # Truncate job ID if too long
+            job_id = job['id'][:29] if len(job['id']) > 29 else job['id']
+            
+            print(f"{job_id:30} | {job['status']:8} | {start_time:19} | {end_time:19} | {duration_str:>8}")
+        
+        print()  # Add newline after table
+        
+        # Display failed job commands if any
         if failed_jobs:
-            print(f"\n✗ Failed Jobs ({len(failed_jobs)}):")
+            print(f"\nFailed Job Commands:")
+            print("-" * 80)
             for job in failed_jobs:
-                status_detail = f"[{job['status']}]"
-                print(f"  {job['id']:30} - {job['description']} {status_detail}")
-                if job['command']:
-                    print(f"    Command: {job['command'][:60]}{'...' if len(job['command']) > 60 else ''}")
-                print(f"    Time: {job['last_run']}")
-        
-        # Display skipped jobs
-        if skipped_jobs:
-            print(f"\n- Skipped Jobs ({len(skipped_jobs)}):")
-            for job in skipped_jobs:
-                print(f"  {job['id']:30} - {job['description']}")
-        
-        # Display other status jobs
-        if other_jobs:
-            print(f"\n? Other Status Jobs ({len(other_jobs)}):")
-            for job in other_jobs:
-                print(f"  {job['id']:30} - {job['description']} [{job['status']}]")
+                if job.get('command'):
+                    print(f"{job['id']}: {job['command']}")
         
         # Display resume instructions if there are failed jobs
         if failed_jobs or skipped_jobs:
@@ -446,15 +456,6 @@ See README.md and docs/ directory in the project repository.
                 failed_job_ids = ','.join([j['id'] for j in failed_jobs])
                 print(f"\nTo mark failed jobs as successful:")
                 print(f"  executioner.py --mark-success -r {args.show_run} -j {failed_job_ids}")
-        
-        # Show log file locations
-        print(f"\nLog Files:")
-        print("-" * 80)
-        print(f"Main log: ./logs/executioner.{run_info['application_name']}.run-{args.show_run}.log")
-        for job in failed_jobs[:3]:  # Show first 3 failed job logs
-            print(f"Job log:  ./logs/executioner.{run_info['application_name']}.job-{job['id']}.run-{args.show_run}.log")
-        if len(failed_jobs) > 3:
-            print(f"... and {len(failed_jobs) - 3} more failed job logs")
         
         sys.exit(0)
     
@@ -643,3 +644,4 @@ See README.md and docs/ directory in the project repository.
 
 if __name__ == "__main__":
     main()
+
