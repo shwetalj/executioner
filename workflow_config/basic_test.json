@@ -1,5 +1,6 @@
 {
     "application_name": "basic_test",
+    "working_dir": "/home/sjoshi/claudelab/executioner",
     "email_address": "shwetal.joshi@gmail.com",
     "email_on_success": true,
     "email_on_failure": true,

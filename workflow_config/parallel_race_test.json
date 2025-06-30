@@ -1,5 +1,6 @@
 {
     "application_name": "parallel_race_test",
+    "working_dir": "/home/sjoshi/claudelab/executioner",
     "email_address": "test@example.com",
     "email_on_success": false,
     "email_on_failure": false,

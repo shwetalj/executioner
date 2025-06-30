@@ -72,13 +72,14 @@ class StateManager:
         self.logger.info(f"Initialized new run with ID: {self.run_id}")
         return self.run_id
     
-    def start_execution(self, continue_on_error: bool = False, dry_run: bool = False) -> None:
+    def start_execution(self, continue_on_error: bool = False, dry_run: bool = False, working_dir: str = None) -> None:
         """
         Start the execution by recording start time and creating run summary.
         
         Args:
             continue_on_error: Whether to continue execution on job failures
             dry_run: Whether this is a dry run (no actual execution)
+            working_dir: Working directory for this execution run
         """
         self.continue_on_error = continue_on_error
         self.dry_run = dry_run
@@ -93,7 +94,8 @@ class StateManager:
                     self.run_id, 
                     self.application_name, 
                     self.start_time, 
-                    len(self.jobs)
+                    len(self.jobs),
+                    working_dir
                 )
                 self.logger.info(f"Created run summary for run ID: {self.run_id}")
             except Exception as e:

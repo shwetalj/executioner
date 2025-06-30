@@ -1,5 +1,7 @@
 from config.loader import Config
 import sys
+import os
+from pathlib import Path
 from jobs.config_utils import handle_config_errors
 from jobs.env_utils import validate_env_vars
 
@@ -36,6 +38,36 @@ def validate_config(config, logger):
                     if not isinstance(item, str):
                         logger.error(f"inherit_shell_env list must contain only strings")
                         raise TypeError("Invalid inherit_shell_env list item type")
+        
+        # Validate working_dir (now mandatory)
+        if "working_dir" not in config:
+            logger.error("Configuration is missing required 'working_dir' field")
+            raise KeyError("Missing required 'working_dir' field")
+        
+        working_dir = config["working_dir"]
+        if not isinstance(working_dir, str):
+            logger.error("working_dir must be a string path")
+            raise TypeError("Invalid working_dir type")
+        
+        # Expand ~ and resolve relative paths
+        working_dir_path = Path(working_dir).expanduser()
+        if not working_dir_path.is_absolute():
+            logger.error(f"working_dir must be an absolute path, got: {working_dir}")
+            raise ValueError("working_dir must be absolute path")
+        
+        # Check if directory exists
+        if not working_dir_path.exists():
+            logger.error(f"working_dir does not exist: {working_dir_path}")
+            raise FileNotFoundError(f"working_dir not found: {working_dir_path}")
+        
+        if not working_dir_path.is_dir():
+            logger.error(f"working_dir is not a directory: {working_dir_path}")
+            raise NotADirectoryError(f"working_dir not a directory: {working_dir_path}")
+        
+        # Check if directory is accessible
+        if not os.access(working_dir_path, os.R_OK | os.W_OK):
+            logger.error(f"working_dir is not readable/writable: {working_dir_path}")
+            raise PermissionError(f"working_dir access denied: {working_dir_path}")
         
         # Check for duplicate job IDs
         job_ids = []

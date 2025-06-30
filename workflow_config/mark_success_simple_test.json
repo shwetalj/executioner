@@ -1,5 +1,6 @@
 {
     "application_name": "simple_mark_test",
+    "working_dir": "/home/sjoshi/claudelab/executioner",
     "email_on_success": false,
     "email_on_failure": false,
     "env_variables": {

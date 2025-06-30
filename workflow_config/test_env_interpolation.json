@@ -1,5 +1,6 @@
 {
   "application_name": "test_env_interp",
+  "working_dir": "/home/sjoshi/claudelab/executioner",
   "env_variables": {
     "BASE_DIR": "/opt/oracle",
     "ORACLE_BASE": "${BASE_DIR}/database",

@@ -171,7 +171,16 @@ def init_db(verbose=False, logger=None):
                     "CREATE INDEX IF NOT EXISTS idx_run_summary_app ON run_summary (application_name)",
                     "CREATE INDEX IF NOT EXISTS idx_run_summary_status ON run_summary (status)",
                     "CREATE INDEX IF NOT EXISTS idx_run_summary_start ON run_summary (start_time)"
-                ], None, "DROP TABLE IF EXISTS run_summary;")
+                ], None, "DROP TABLE IF EXISTS run_summary;"),
+                (6, "Add working directory support", [
+                    "ALTER TABLE run_summary ADD COLUMN working_dir TEXT"
+                ], None, """
+                -- SQLite doesn't support DROP COLUMN, but here's the rollback info
+                -- CREATE TABLE backup AS SELECT run_id, application_name, start_time, end_time, status, total_jobs, completed_jobs, failed_jobs, skipped_jobs, exit_code, created_at FROM run_summary;
+                -- DROP TABLE run_summary;
+                -- CREATE TABLE run_summary AS SELECT * FROM backup;
+                -- DROP TABLE backup;
+                """)
             ]
             migration_id = None
             if current_version < len(migrations):

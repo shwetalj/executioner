@@ -31,15 +31,15 @@ class ExecutionHistoryManager:
             return (last_run_id + 1) if last_run_id is not None else 1
     
     @handle_db_errors(lambda self: self.logger)
-    def create_run_summary(self, run_id, application_name, start_time, total_jobs):
+    def create_run_summary(self, run_id, application_name, start_time, total_jobs, working_dir=None):
         """Create a new run summary entry"""
         with db_connection(self.logger) as conn:
             cursor = conn.cursor()
             try:
                 cursor.execute("""
-                    INSERT INTO run_summary (run_id, application_name, start_time, status, total_jobs)
-                    VALUES (?, ?, ?, 'RUNNING', ?)
-                """, (run_id, application_name, start_time.strftime('%Y-%m-%d %H:%M:%S'), total_jobs))
+                    INSERT INTO run_summary (run_id, application_name, start_time, status, total_jobs, working_dir)
+                    VALUES (?, ?, ?, 'RUNNING', ?, ?)
+                """, (run_id, application_name, start_time.strftime('%Y-%m-%d %H:%M:%S'), total_jobs, working_dir))
                 conn.commit()
             except Exception as e:
                 # Handle the case where run_summary already exists (e.g., from previous run or race condition)
@@ -319,7 +319,7 @@ class ExecutionHistoryManager:
             # First try to get info from run_summary table
             cursor.execute("""
                 SELECT application_name, start_time, end_time, status, 
-                       total_jobs, completed_jobs, failed_jobs, skipped_jobs
+                       total_jobs, completed_jobs, failed_jobs, skipped_jobs, working_dir
                 FROM run_summary
                 WHERE run_id = ?
             """, (run_id,))
@@ -328,7 +328,7 @@ class ExecutionHistoryManager:
             
             if summary_row:
                 # Use run_summary data
-                app_name, start_time, end_time, status, total_jobs, completed_jobs, failed_jobs, skipped_jobs = summary_row
+                app_name, start_time, end_time, status, total_jobs, completed_jobs, failed_jobs, skipped_jobs, working_dir = summary_row
                 
                 # Calculate duration
                 duration = 'N/A'
@@ -393,6 +393,9 @@ class ExecutionHistoryManager:
                     except Exception as e:
                         self.logger.debug(f"Error calculating duration from job_history: {e}")
                         duration = 'N/A'
+                
+                # No working_dir available in fallback mode
+                working_dir = None
             
             run_info = {
                 'run_id': run_id,
@@ -404,7 +407,8 @@ class ExecutionHistoryManager:
                 'total_jobs': total_jobs,
                 'successful_jobs': completed_jobs if summary_row else successful_jobs,
                 'failed_jobs': failed_jobs,
-                'skipped_jobs': skipped_jobs
+                'skipped_jobs': skipped_jobs,
+                'working_dir': working_dir
             }
             
             # Get individual job details
@@ -421,7 +425,7 @@ class ExecutionHistoryManager:
                 
                 # Calculate end time from start time and duration
                 end_time = None
-                if last_run and duration_seconds:
+                if last_run and duration_seconds is not None:
                     try:
                         from datetime import datetime, timedelta
                         start_dt = datetime.fromisoformat(last_run.replace(' ', 'T'))

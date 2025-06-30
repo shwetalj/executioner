@@ -44,9 +44,10 @@ from jobs.execution_orchestrator import ExecutionOrchestrator
 from jobs.summary_reporter import SummaryReporter
 
 class JobExecutioner:
-    def __init__(self, config_file: str):
-        # Store the config file path for later use
+    def __init__(self, config_file: str, working_dir: str = None):
+        # Store the config file path and working directory for later use
         self.config_file = config_file
+        self.working_dir = working_dir
         # Set up a minimal logger for early errors
         # self.logger = logging.getLogger('executioner')
         # self.logger.handlers.clear()
@@ -376,7 +377,7 @@ class JobExecutioner:
             self.logger.info(f"Found {len(self.dependency_plugins)} dependency plugins to load")
             self.dependency_manager.load_dependency_plugins()
         # Set initial state through state manager
-        self.state_manager.start_execution(continue_on_error, dry_run)
+        self.state_manager.start_execution(continue_on_error, dry_run, self.working_dir)
         self.skip_jobs = set(skip_jobs or [])
         divider = f"{Config.COLOR_CYAN}{'='*90}{Config.COLOR_RESET}"
         dry_run_text = " [DRY RUN]" if dry_run else ""

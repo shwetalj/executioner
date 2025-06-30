@@ -64,6 +64,7 @@ def parse_skip_jobs(skip_list):
 
 SIMPLE_CONFIG = """{
     "application_name": "my_pipeline",
+    "working_dir": "/home/user/my_pipeline",
     "jobs": [
         {
             "id": "job1",
@@ -96,6 +97,7 @@ use --sample-config to see a comprehensive example."""
 
 SAMPLE_CONFIG = """{
     "application_name": "data_pipeline",
+    "working_dir": "/opt/pipeline",
     "default_timeout": 10800,
     "default_max_retries": 2,
     "default_retry_delay": 30,
@@ -404,7 +406,13 @@ See README.md and docs/ directory in the project repository.
         print(f"Successful Jobs: {len(successful_jobs)}")
         print(f"Failed Jobs: {len(failed_jobs)}")
         print(f"Skipped Jobs: {len(skipped_jobs)}")
-        print(f"Main log: {os.path.abspath('./logs/executioner.' + run_info['application_name'] + '.run-' + str(args.show_run) + '.log')}")
+        # Use stored working directory for log path, fallback to current directory
+        if run_info.get('working_dir'):
+            log_path = os.path.join(run_info['working_dir'], 'logs', f"executioner.{run_info['application_name']}.run-{args.show_run}.log")
+        else:
+            # Fallback for older runs without working_dir
+            log_path = os.path.abspath(f"./logs/executioner.{run_info['application_name']}.run-{args.show_run}.log")
+        print(f"Main log: {log_path}")
         
         # Display job details in tabular format
         print(f"\nJob Status Details:")
@@ -558,15 +566,40 @@ See README.md and docs/ directory in the project repository.
     except Exception as e:
         print(f"Error reading configuration file '{args.config}': {e}")
         sys.exit(1)
+    
+    # Handle working directory - must be done before setting log directory
+    # working_dir is now mandatory - validate early
+    if "working_dir" not in config_data:
+        print("Error: Configuration is missing required 'working_dir' field")
+        print("Please add a 'working_dir' field with an absolute path to your config file.")
+        print("Example: \"working_dir\": \"/home/user/project\"")
+        print("Use --sample-config to see a complete example configuration.")
+        sys.exit(1)
+    
+    working_dir = Path(config_data["working_dir"]).expanduser().resolve()
+    
+    # Change to working directory
+    original_cwd = Path.cwd()
+    try:
+        os.chdir(working_dir)
+        if args.verbose or args.debug:
+            print(f"Changed working directory to: {working_dir}")
+    except Exception as e:
+        print(f"Error: Cannot change to working directory '{working_dir}': {e}")
+        sys.exit(1)
+    
+    # Store working directory for database
+    resolved_working_dir = str(working_dir)
         
     if "log_dir" in config_data:
+        # If log_dir is relative, it's now relative to working_dir
         Config.set_log_dir(config_data["log_dir"])
     else:
         Config.set_log_dir(Path.cwd() / "logs")
     ensure_log_dir()
 
     init_db(verbose=args.verbose)
-    executioner = JobExecutioner(args.config)
+    executioner = JobExecutioner(args.config, resolved_working_dir)
 
     # Store original job-level envs for each job before merging
     original_job_envs = {job_id: dict(job.get("env_variables", {})) for job_id, job in executioner.jobs.items()}
@@ -607,12 +640,20 @@ See README.md and docs/ directory in the project repository.
 
     if args.sequential:
         executioner.parallel = False
+        executioner.execution_orchestrator.parallel = False
         executioner.logger.info("Parallel execution disabled")
     elif args.parallel:
         executioner.parallel = True
+        executioner.execution_orchestrator.parallel = True
         executioner.logger.info("Parallel execution enabled")
+        # If parallel is enabled and no explicit workers set, use the config default
+        if args.workers is None:
+            executioner.logger.info(f"Using {executioner.max_workers} workers from config")
+    
+    # Override workers if specified on command line
     if args.workers is not None and args.workers > 0:
         executioner.max_workers = args.workers
+        executioner.execution_orchestrator.max_workers = args.workers
         executioner.logger.info(f"Set workers to {args.workers}")
 
     if args.resume_failed_only and args.resume_from is None:

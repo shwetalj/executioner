@@ -1,5 +1,6 @@
 {
   "application_name": "meta-executioner-demo",
+  "working_dir": "/home/sjoshi/claudelab/executioner",
   "jobs": [
     {
       "id": "echo_hello",

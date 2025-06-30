@@ -1,5 +1,6 @@
 {
   "application_name": "test_pre_post_checks",
+  "working_dir": "/home/sjoshi/claudelab/executioner",
   "env_variables": {},
   "jobs": [
     {
