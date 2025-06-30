@@ -2,8 +2,11 @@ from config.loader import Config
 import sys
 import os
 from pathlib import Path
+from typing import Dict, List, Tuple, Any, Optional, Set
+from collections import defaultdict
 from jobs.config_utils import handle_config_errors
 from jobs.env_utils import validate_env_vars
+from jobs.exceptions import ConfigurationError, ValidationError, ErrorCodes
 
 def validate_config(config, logger):
     """Validate configuration against a basic schema."""
@@ -111,4 +114,121 @@ def validate_config(config, logger):
                     raise ValueError(f"Job '{job['id']}' has invalid environment variables")
             if "dependencies" in job and not isinstance(job["dependencies"], list):
                 logger.error(f"Job '{job['id']}' has invalid dependencies")
-                raise TypeError(f"Job '{job['id']}' has invalid dependencies") 
+                raise TypeError(f"Job '{job['id']}' has invalid dependencies")
+
+
+def validate_job_config(job: Dict[str, Any]) -> List[str]:
+    """Validate a single job configuration and return list of errors.
+    
+    Enhanced validation with better error messages.
+    
+    Args:
+        job: Job configuration dictionary
+        
+    Returns:
+        List of error messages
+    """
+    errors = []
+    
+    # Type validations
+    if not isinstance(job.get('id'), str):
+        errors.append(f"Job ID must be a string, got {type(job.get('id')).__name__}")
+    
+    if not isinstance(job.get('command'), str):
+        errors.append(f"Job command must be a string, got {type(job.get('command')).__name__}")
+    
+    # Business logic validations
+    if job.get('timeout', 0) <= 0:
+        errors.append(f"Job {job.get('id', '<unnamed>')}: timeout must be positive")
+    
+    # Dependency validations
+    deps = job.get('dependencies', [])
+    if len(deps) != len(set(deps)):
+        errors.append(f"Job {job.get('id', '<unnamed>')}: duplicate dependencies found")
+    
+    # Retry validations
+    if 'retry_count' in job and job['retry_count'] < 0:
+        errors.append(f"Job {job.get('id', '<unnamed>')}: retry_count cannot be negative")
+    
+    if 'retry_delay' in job and job['retry_delay'] < 0:
+        errors.append(f"Job {job.get('id', '<unnamed>')}: retry_delay cannot be negative")
+    
+    return errors
+
+
+def find_circular_dependencies(jobs: Dict[str, Dict]) -> List[List[str]]:
+    """Find all circular dependencies in job configuration.
+    
+    Args:
+        jobs: Dictionary mapping job IDs to job configs
+        
+    Returns:
+        List of circular dependency paths
+    """
+    cycles = []
+    visited = set()
+    rec_stack = set()
+    path = []
+    
+    def dfs(job_id: str) -> bool:
+        visited.add(job_id)
+        rec_stack.add(job_id)
+        path.append(job_id)
+        
+        job = jobs.get(job_id, {})
+        deps = job.get('dependencies', [])
+        
+        for dep in deps:
+            if not isinstance(dep, str):
+                continue
+                
+            if dep not in visited:
+                if dep in jobs and dfs(dep):
+                    return True
+            elif dep in rec_stack:
+                # Found a cycle
+                cycle_start = path.index(dep)
+                cycles.append(path[cycle_start:])
+                return True
+        
+        path.pop()
+        rec_stack.remove(job_id)
+        return False
+    
+    # Check all jobs
+    for job_id in jobs:
+        if job_id not in visited:
+            dfs(job_id)
+    
+    return cycles
+
+
+def validate_job_dependencies(config: Dict[str, Any], logger) -> Tuple[bool, List[str]]:
+    """Validate job dependencies for missing refs and circular dependencies.
+    
+    Args:
+        config: Configuration dictionary
+        logger: Logger instance
+        
+    Returns:
+        Tuple of (is_valid, error_messages)
+    """
+    errors = []
+    jobs = {job['id']: job for job in config['jobs'] 
+            if isinstance(job, dict) and 'id' in job}
+    
+    # Check for missing dependencies
+    for job_id, job in jobs.items():
+        if 'dependencies' in job and isinstance(job['dependencies'], list):
+            for dep in job['dependencies']:
+                if isinstance(dep, str) and dep not in jobs:
+                    errors.append(f"Job '{job_id}' depends on non-existent job '{dep}'")
+    
+    # Check for circular dependencies
+    cycles = find_circular_dependencies(jobs)
+    if cycles:
+        for cycle in cycles:
+            cycle_str = ' -> '.join(cycle) + f' -> {cycle[0]}'
+            errors.append(f"Circular dependency detected: {cycle_str}")
+    
+    return len(errors) == 0, errors

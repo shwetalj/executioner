@@ -53,7 +53,7 @@ class StructuredFormatter(logging.Formatter):
 
 #### Day 3-4: Configuration Validation Improvements
 ```python
-# config/validator_v2.py
+# config/validator.py (enhanced with new functions)
 def validate_job_config(job: dict) -> List[str]:
     """Enhanced validation with better error messages"""
     errors = []
