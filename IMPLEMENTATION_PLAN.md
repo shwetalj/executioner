@@ -4,6 +4,17 @@
 
 This document provides a detailed implementation plan for modernizing the Executioner architecture. Each improvement is broken down into phases with specific tasks, dependencies, and estimated effort.
 
+## Python 3.6 Compatibility Requirement
+
+**IMPORTANT**: All implementations MUST maintain compatibility with Python 3.6 as the minimum supported version. This affects several modern Python features and requires careful consideration throughout the implementation.
+
+### Key Compatibility Guidelines:
+- Use `typing_extensions` for advanced type hints not available in Python 3.6
+- Use `dataclasses` backport for Python < 3.7
+- Avoid Python 3.7+ exclusive features (walrus operator, positional-only parameters, pattern matching)
+- Test all code on Python 3.6 before committing
+- Use conditional imports where necessary for version-specific features
+
 ## Table of Contents
 
 1. [Database Design & Scalability](#1-database-design--scalability)
@@ -17,6 +28,7 @@ This document provides a detailed implementation plan for modernizing the Execut
 9. [Resource Management](#9-resource-management)
 10. [Modern Python Features](#10-modern-python-features)
 11. [Implementation Timeline](#implementation-timeline)
+12. [Python 3.6 Compatibility Requirements](#python-36-compatibility-requirements)
 
 ---
 
@@ -415,6 +427,8 @@ class ExecutionHistoryManager:
 1. **Define configuration models**
    ```python
    # config/models.py
+   # Note: Pydantic v1.x supports Python 3.6+
+   # Use pydantic>=1.8.0,<2.0 for Python 3.6 compatibility
    from pydantic import BaseModel, Field, validator
    from typing import List, Dict, Optional
    
@@ -798,22 +812,26 @@ class ExecutionHistoryManager:
 
 ---
 
-## 10. Modern Python Features
+## 10. Modern Python Features (Python 3.6+ Compatible)
 
 ### Phase 1: Type Hints Throughout (1 week)
 
 #### Tasks:
-1. **Add comprehensive type hints**
+1. **Add comprehensive type hints (Python 3.6 compatible)**
    ```python
-   # Example of fully typed function
-   from typing import Dict, List, Optional, Union, Tuple
-   from pathlib import Path
+   # Example of fully typed function with Python 3.6 compatibility
+   from typing import Dict, List, Optional, Union, Tuple, Any
+   # For Python 3.6, use typing_extensions for advanced types
+   try:
+       from typing import Protocol, TypedDict, Literal  # Python 3.8+
+   except ImportError:
+       from typing_extensions import Protocol, TypedDict, Literal
    
    def process_job_config(
-       config_path: Path,
+       config_path: str,  # Use str instead of Path for type hints in 3.6
        overrides: Optional[Dict[str, Any]] = None,
        validate: bool = True
-   ) -> Tuple[JobConfig, List[ValidationError]]:
+   ) -> Tuple['JobConfig', List['ValidationError']]:
        """
        Process job configuration with optional overrides.
        
@@ -825,8 +843,10 @@ class ExecutionHistoryManager:
        Returns:
            Tuple of JobConfig and list of validation errors
        """
+       from pathlib import Path  # Import Path for usage, not type hints
+       
        errors: List[ValidationError] = []
-       config_data = load_config(config_path)
+       config_data = load_config(Path(config_path))
        
        if overrides:
            config_data = merge_configs(config_data, overrides)
@@ -837,11 +857,11 @@ class ExecutionHistoryManager:
        return JobConfig(**config_data), errors
    ```
 
-2. **Add mypy configuration**
+2. **Add mypy configuration for Python 3.6**
    ```ini
    # mypy.ini
    [mypy]
-   python_version = 3.11
+   python_version = 3.6  # Set to minimum supported version
    warn_return_any = True
    warn_unused_configs = True
    disallow_untyped_defs = True
@@ -854,22 +874,34 @@ class ExecutionHistoryManager:
    warn_no_return = True
    warn_unreachable = True
    strict_equality = True
+   
+   # Allow typing_extensions
+   [mypy-typing_extensions]
+   ignore_missing_imports = True
    ```
 
 ### Phase 2: Dataclasses and Modern Patterns (1 week)
 
 #### Tasks:
-1. **Convert to dataclasses**
+1. **Convert to dataclasses (Python 3.6 compatible)**
    ```python
    # models/job_models.py
-   from dataclasses import dataclass, field
+   import sys
+   
+   # Handle dataclasses import for Python 3.6
+   if sys.version_info >= (3, 7):
+       from dataclasses import dataclass, field
+   else:
+       # Use backport for Python 3.6
+       from dataclasses import dataclass, field  # pip install dataclasses
+   
    from datetime import datetime
    from typing import Optional, Dict, Any
    
    @dataclass
    class JobResult:
        job_id: str
-       status: JobState
+       status: str  # Use string instead of Enum for simpler 3.6 compatibility
        start_time: datetime
        end_time: datetime
        exit_code: Optional[int] = None
@@ -885,23 +917,22 @@ class ExecutionHistoryManager:
        
        @property
        def is_success(self) -> bool:
-           return self.status == JobState.SUCCESS
+           return self.status == "SUCCESS"
    ```
 
-2. **Use structural pattern matching**
+2. **Use traditional conditionals instead of pattern matching**
    ```python
-   # Python 3.10+ pattern matching
+   # Python 3.6 compatible (no pattern matching)
    def handle_job_result(result: JobResult) -> None:
-       match result.status:
-           case JobState.SUCCESS:
-               logger.info(f"Job {result.job_id} completed successfully")
-           case JobState.FAILED | JobState.TIMEOUT:
-               logger.error(f"Job {result.job_id} failed: {result.error_message}")
-               if result.retry_count < max_retries:
-                   schedule_retry(result.job_id)
-           case JobState.SKIPPED:
-               logger.warning(f"Job {result.job_id} was skipped")
-           case _:
+       if result.status == "SUCCESS":
+           logger.info(f"Job {result.job_id} completed successfully")
+       elif result.status in ("FAILED", "TIMEOUT"):
+           logger.error(f"Job {result.job_id} failed: {result.error_message}")
+           if result.retry_count < max_retries:
+               schedule_retry(result.job_id)
+       elif result.status == "SKIPPED":
+           logger.warning(f"Job {result.job_id} was skipped")
+       else:
                logger.error(f"Unknown job status: {result.status}")
    ```
 
@@ -1015,3 +1046,133 @@ Key success factors:
 - Regular performance and quality metrics tracking
 
 The total implementation timeline is approximately 6 months for the complete modernization, but benefits will be realized incrementally throughout the process.
+
+---
+
+## Python 3.6 Compatibility Requirements
+
+### Overview
+
+All code implementations MUST maintain compatibility with Python 3.6 as the minimum supported version. This section outlines the specific requirements and guidelines for ensuring compatibility.
+
+### Required Dependencies
+
+Add to `requirements.txt` or `setup.py`:
+```txt
+# Python 3.6 compatibility packages
+dataclasses>=0.6; python_version < '3.7'
+typing_extensions>=3.7.4; python_version < '3.8'
+contextvars>=2.4; python_version < '3.7'  # For async context
+```
+
+### Compatibility Patterns
+
+#### 1. Import Handling
+```python
+# Always use conditional imports for version-specific features
+import sys
+
+if sys.version_info >= (3, 7):
+    from dataclasses import dataclass, field
+else:
+    from dataclasses import dataclass, field  # backport
+
+# For typing extensions
+try:
+    from typing import Protocol, TypedDict, Literal  # Python 3.8+
+except ImportError:
+    from typing_extensions import Protocol, TypedDict, Literal
+```
+
+#### 2. Feature Compatibility Table
+
+| Feature | Python 3.6 | Alternative |
+|---------|------------|-------------|
+| f-strings | ✅ Supported | Use freely |
+| Type hints | ✅ Basic support | Use typing_extensions for advanced types |
+| Dataclasses | ❌ Not supported | Use dataclasses backport |
+| Walrus operator `:=` | ❌ Not supported | Use traditional assignment |
+| Dict merge `\|` | ❌ Not supported | Use `{**dict1, **dict2}` |
+| Positional-only `/` | ❌ Not supported | Document in docstrings |
+| Pattern matching | ❌ Not supported | Use if/elif chains |
+| `asyncio.run()` | ❌ Not supported | Use event loop directly |
+
+#### 3. Testing Requirements
+
+1. **CI/CD Configuration**:
+   ```yaml
+   # .github/workflows/test.yml or similar
+   python-version: [3.6, 3.7, 3.8, 3.9, 3.10, 3.11]
+   ```
+
+2. **Local Testing**:
+   ```bash
+   # Test with Python 3.6 before committing
+   pyenv local 3.6.15  # or latest 3.6.x
+   python -m pytest
+   mypy --python-version 3.6 .
+   ```
+
+#### 4. Code Review Checklist
+
+Before committing any code:
+- [ ] No walrus operators (`:=`)
+- [ ] No native dataclasses without import guards
+- [ ] No pattern matching (`match`/`case`)
+- [ ] No positional-only parameters (`/`)
+- [ ] No dict merge operators (`|`)
+- [ ] All type hints use `typing_extensions` when needed
+- [ ] Tested on Python 3.6
+- [ ] Mypy passes with `python_version = 3.6`
+
+#### 5. Common Pitfalls to Avoid
+
+1. **String annotations** (Python 3.7+):
+   ```python
+   # Don't use
+   def func() -> 'SomeClass':  # Might fail in 3.6
+   
+   # Do use
+   from __future__ import annotations  # At top of file
+   ```
+
+2. **Dict ordering** (guaranteed in 3.7+):
+   ```python
+   # Don't rely on dict ordering in 3.6
+   # Use OrderedDict if order matters
+   from collections import OrderedDict
+   ```
+
+3. **Async comprehensions** (Python 3.6 has limited support):
+   ```python
+   # Be careful with async comprehensions
+   # Test thoroughly on Python 3.6
+   ```
+
+### Version Constants
+
+Add to a central location (e.g., `core/compat.py`):
+```python
+import sys
+
+PY36 = sys.version_info[:2] == (3, 6)
+PY37_PLUS = sys.version_info >= (3, 7)
+PY38_PLUS = sys.version_info >= (3, 8)
+PY39_PLUS = sys.version_info >= (3, 9)
+PY310_PLUS = sys.version_info >= (3, 10)
+
+# Use these for conditional logic
+if PY37_PLUS:
+    # Use newer features
+else:
+    # Use compatibility code
+```
+
+### Documentation
+
+Always document Python version requirements:
+- In README.md: "Requires Python 3.6 or higher"
+- In setup.py: `python_requires='>=3.6'`
+- In function docstrings when using version-specific features
+
+By following these guidelines, we ensure that the Executioner remains accessible to users who may be constrained to Python 3.6 environments while still leveraging modern Python features where available.
