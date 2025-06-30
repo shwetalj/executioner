@@ -264,6 +264,7 @@ See README.md and docs/ directory in the project repository.
     logging_group.add_argument("--debug", action="store_true", help="Enable debug logging (most detailed output)")
     logging_group.add_argument("--verbose", action="store_true", help="Enable verbose logging (INFO level messages)")
     logging_group.add_argument("--visible", action="store_true", help="Display all environment variables for each job before execution")
+    logging_group.add_argument("--json-logs", action="store_true", help="Output logs in structured JSON format")
 
     if len(sys.argv) == 1:
         parser.print_help(sys.stderr)
@@ -599,7 +600,7 @@ See README.md and docs/ directory in the project repository.
     ensure_log_dir()
 
     init_db(verbose=args.verbose)
-    executioner = JobExecutioner(args.config, resolved_working_dir)
+    executioner = JobExecutioner(args.config, resolved_working_dir, json_logs=args.json_logs)
 
     # Store original job-level envs for each job before merging
     original_job_envs = {job_id: dict(job.get("env_variables", {})) for job_id, job in executioner.jobs.items()}

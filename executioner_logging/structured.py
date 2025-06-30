@@ -18,18 +18,21 @@ class StructuredFormatter(logging.Formatter):
     def __init__(self, 
                  include_timestamp: bool = True,
                  include_hostname: bool = False,
-                 include_process_info: bool = False):
+                 include_process_info: bool = False,
+                 include_source: bool = False):
         """Initialize the structured formatter.
         
         Args:
             include_timestamp: Whether to include timestamp in logs
             include_hostname: Whether to include hostname
             include_process_info: Whether to include process/thread info
+            include_source: Whether to include source file/line info (for debugging)
         """
         super().__init__()
         self.include_timestamp = include_timestamp
         self.include_hostname = include_hostname
         self.include_process_info = include_process_info
+        self.include_source = include_source
         
         # Cache hostname if needed
         if include_hostname:
@@ -72,7 +75,8 @@ class StructuredFormatter(logging.Formatter):
         
         # Add any custom attributes from the record
         # Common executioner-specific attributes
-        for attr in ['job_id', 'run_id', 'workflow_id', 'dependency', 'error_code']:
+        for attr in ['job_id', 'run_id', 'workflow_id', 'command', 'duration', 
+                     'exit_code', 'status', 'dependency', 'error_code']:
             if hasattr(record, attr):
                 value = getattr(record, attr)
                 if value is not None:
@@ -86,12 +90,13 @@ class StructuredFormatter(logging.Formatter):
                 'traceback': traceback.format_exception(*record.exc_info)
             }
         
-        # Add source location
-        log_data['source'] = {
-            'file': record.pathname,
-            'line': record.lineno,
-            'function': record.funcName
-        }
+        # Add source location only if requested (for debugging)
+        if self.include_source:
+            log_data['source'] = {
+                'file': record.pathname,
+                'line': record.lineno,
+                'function': record.funcName
+            }
         
         # Serialize to JSON
         try:

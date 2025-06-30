@@ -63,9 +63,12 @@ class JobRunner(JobStatusMixin):
         job_logger, job_file_handler, job_log_path = self.setup_job_logger(self.job_id)
         fail_reason = None
         try:
-            # User-facing job start
-            self.main_logger.info(f"Starting job '{self.job_id}'")
-            self.main_logger.info(f"Running job: {self.job_id} Command: {command}")
+            # Log job start with all context in one message
+            self.main_logger.info(f"Job '{self.job_id}' started", extra={
+                'job_id': self.job_id, 
+                'command': command,
+                'event': 'job_start'
+            })
             if dry_run:
                 print(f"[DRY RUN] Would execute job: {self.job_id} - Command: {command[:60]}{'...' if len(command) > 60 else ''}")
                 if return_reason:
@@ -151,8 +154,14 @@ class JobRunner(JobStatusMixin):
                                 return True, None
                             return True
                     else:
-                        msg = f"Job '{self.job_id}' completed successfully in {duration:.2f} seconds"
-                        self.main_logger.info(msg)
+                        self.main_logger.info(f"Job '{self.job_id}' completed", extra={
+                            'job_id': self.job_id, 
+                            'command': command,
+                            'duration': round(duration, 2),
+                            'status': 'SUCCESS',
+                            'exit_code': exit_code,
+                            'event': 'job_complete'
+                        })
                         self.mark_success(self.job_id, duration=duration, start_time=attempt_start_dt.strftime('%Y-%m-%d %H:%M:%S'))
                         if return_reason:
                             return True, None

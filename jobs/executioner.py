@@ -44,10 +44,11 @@ from jobs.execution_orchestrator import ExecutionOrchestrator
 from jobs.summary_reporter import SummaryReporter
 
 class JobExecutioner:
-    def __init__(self, config_file: str, working_dir: str = None):
+    def __init__(self, config_file: str, working_dir: str = None, json_logs: bool = False):
         # Store the config file path and working directory for later use
         self.config_file = config_file
         self.working_dir = working_dir
+        self.json_logs = json_logs
         # Set up a minimal logger for early errors
         # self.logger = logging.getLogger('executioner')
         # self.logger.handlers.clear()
@@ -70,7 +71,7 @@ class JobExecutioner:
         
         # Validate configuration schema before accessing jobs
         # Use a temporary logger for validation errors
-        temp_logger = setup_logging(self.application_name, "main")
+        temp_logger = setup_logging(self.application_name, "main", json_logs=False)
         validate_config(self.config, temp_logger)
         try:
             self.jobs: Dict[str, Dict] = {job["id"]: job for job in self.config["jobs"]}
@@ -87,7 +88,7 @@ class JobExecutioner:
         
         # Initialize run and set up logger with run_id
         self.run_id = self.state_manager.initialize_run()
-        self.logger = setup_logging(self.application_name, self.run_id)
+        self.logger = setup_logging(self.application_name, self.run_id, self.json_logs)
         self.job_history.set_logger(self.logger)
         
         # Email notification settings
@@ -317,7 +318,7 @@ class JobExecutioner:
         job_log_dir = job.get("log_dir", Config.LOG_DIR)
         os.makedirs(job_log_dir, exist_ok=True)
         job_log_path = os.path.join(job_log_dir, f"executioner.{self.application_name}.job-{job_id}.run-{self.run_id}.log")
-        job_logger, job_file_handler = setup_job_logger(self.application_name, self.run_id, job_id, job_log_path)
+        job_logger, job_file_handler = setup_job_logger(self.application_name, self.run_id, job_id, job_log_path, self.json_logs)
         job_description = job.get('description', '')
         job_command = job['command']
         job_logger.info(f"Executing job - {job_id}: {job_command}")
