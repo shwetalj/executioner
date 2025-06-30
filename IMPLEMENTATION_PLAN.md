@@ -37,80 +37,112 @@ This document provides a detailed implementation plan for modernizing the Execut
 ### Phase 1: Create Database Abstraction Layer (2 weeks)
 
 #### Tasks:
-1. **Define abstract base class for database operations**
+1. **Define abstract base class for database operations (no ORM)**
    ```python
    # db/interfaces/database_interface.py
    from abc import ABC, abstractmethod
-   from typing import Any, Dict, List, Optional
+   from typing import Any, Dict, List, Optional, Tuple
    
    class DatabaseInterface(ABC):
+       """Direct SQL interface - no ORM"""
        @abstractmethod
-       def execute(self, query: str, params: Optional[Dict[str, Any]] = None) -> Any:
+       def execute(self, query: str, params: Optional[Tuple] = None) -> Any:
+           """Execute SQL with positional parameters"""
            pass
        
        @abstractmethod
-       def execute_many(self, query: str, params_list: List[Dict[str, Any]]) -> Any:
+       def fetch_one(self, query: str, params: Optional[Tuple] = None) -> Optional[Tuple]:
+           """Fetch one row as tuple"""
            pass
        
        @abstractmethod
-       def fetch_one(self, query: str, params: Optional[Dict[str, Any]] = None) -> Optional[Dict]:
-           pass
-       
-       @abstractmethod
-       def fetch_all(self, query: str, params: Optional[Dict[str, Any]] = None) -> List[Dict]:
+       def fetch_all(self, query: str, params: Optional[Tuple] = None) -> List[Tuple]:
+           """Fetch all rows as list of tuples"""
            pass
    ```
 
-2. **Implement SQLite adapter**
+2. **Implement SQLite adapter using stdlib only**
    ```python
    # db/adapters/sqlite_adapter.py
+   import sqlite3  # stdlib only
+   
    class SQLiteAdapter(DatabaseInterface):
        def __init__(self, db_path: str):
            self.db_path = db_path
+       
+       def execute(self, query: str, params: Optional[Tuple] = None) -> Any:
+           with sqlite3.connect(self.db_path) as conn:
+               cursor = conn.cursor()
+               return cursor.execute(query, params or ())
    ```
 
-3. **Create connection pool interface**
+3. **Simple connection management (no external pooling libraries)**
    ```python
-   # db/connection_pool.py
-   class ConnectionPool:
-       def __init__(self, db_interface: DatabaseInterface, pool_size: int = 10):
-           self._pool = Queue(maxsize=pool_size)
-           self._db_interface = db_interface
+   # db/connection_manager.py
+   import threading
+   
+   class SimpleConnectionManager:
+       """Basic connection management using stdlib only"""
+       def __init__(self, adapter_class, **kwargs):
+           self.adapter_class = adapter_class
+           self.config = kwargs
+           self._local = threading.local()
+       
+       def get_connection(self):
+           if not hasattr(self._local, 'adapter'):
+               self._local.adapter = self.adapter_class(**self.config)
+           return self._local.adapter
    ```
 
 #### Dependencies:
-- No external dependencies, can start immediately
+- None - uses Python stdlib only
 
 #### Testing:
-- Unit tests for abstract interface
-- Integration tests for SQLite adapter
-- Performance tests for connection pooling
+- Unit tests using stdlib unittest or existing pytest
+- Direct SQL testing without ORM overhead
 
 ### Phase 2: Migrate Existing Code (1 week)
 
 #### Tasks:
-1. Update `ExecutionHistoryManager` to use new interface
-2. Update `StateManager` to use new interface
-3. Create migration guide for existing code
-4. Add deprecation warnings to old methods
+1. Update `ExecutionHistoryManager` to use direct SQL
+2. Update `StateManager` to use direct SQL
+3. Remove any ORM-style query builders
+4. Use parameterized queries for security
 
 #### Migration Strategy:
 ```python
-# Gradual migration approach
+# Direct SQL approach
 class ExecutionHistoryManager:
-    def __init__(self, jobs, queue_manager, state_manager, logger, db_interface=None):
-        self.db_interface = db_interface or SQLiteAdapter(Config.DB_FILE)
-        # Existing code continues to work
+    def update_job_status(self, run_id: int, job_id: str, status: str):
+        query = "UPDATE job_history SET status = ? WHERE run_id = ? AND id = ?"
+        self.db.execute(query, (status, run_id, job_id))
 ```
 
 ### Phase 3: Add Oracle Support (1 week)
 
 #### Tasks:
-1. Implement Oracle adapter using cx_Oracle
-2. Add Oracle connection configuration (DSN, user, password)
-3. Create Oracle-specific schema with proper data types
-4. Add database type detection
-5. Handle Oracle-specific SQL syntax (sequences, VARCHAR2, etc.)
+1. **Create Oracle adapter (if cx_Oracle is approved)**
+   ```python
+   # db/adapters/oracle_adapter.py
+   # Note: Requires cx_Oracle package approval
+   # Alternative: Use subprocess to call sqlplus if package not approved
+   
+   class OracleAdapter(DatabaseInterface):
+       def __init__(self, dsn: str, user: str, password: str):
+           self.connection_params = (user, password, dsn)
+   ```
+
+2. **Oracle-specific schema**
+   ```sql
+   -- Use NUMBER instead of INTEGER
+   -- Use VARCHAR2 instead of TEXT
+   -- Use TIMESTAMP instead of DATETIME
+   ```
+
+3. **Handle Oracle syntax differences**
+   - Sequences instead of AUTOINCREMENT
+   - DUAL table for SELECT without FROM
+   - Different date formatting
 
 ---
 
@@ -228,32 +260,59 @@ class ExecutionHistoryManager:
 ### Phase 2: Metrics Collection (1 week)
 
 #### Tasks:
-1. **Implement metrics collector**
+1. **Implement metrics collector using stdlib only**
    ```python
    # monitoring/metrics.py
+   import json
+   import time
+   import threading
+   from collections import defaultdict
+   from typing import Dict, Any
+   
    class MetricsCollector:
+       """Simple metrics collection without external dependencies"""
        def __init__(self):
            self.metrics = defaultdict(list)
+           self._lock = threading.Lock()
        
        def record_job_duration(self, job_id: str, duration: float):
-           self.metrics['job_duration'].append({
-               'job_id': job_id,
-               'duration': duration,
-               'timestamp': time.time()
-           })
+           with self._lock:
+               self.metrics['job_duration'].append({
+                   'job_id': job_id,
+                   'duration': duration,
+                   'timestamp': time.time()
+               })
+       
+       def export_json(self, filepath: str):
+           """Export metrics to JSON file for monitoring tools"""
+           with self._lock:
+               with open(filepath, 'w') as f:
+                   json.dump(dict(self.metrics), f, indent=2)
    ```
 
-2. **Add Prometheus integration**
+2. **Create simple metrics endpoint (no Prometheus)**
    ```python
-   # monitoring/prometheus_exporter.py
-   from prometheus_client import Counter, Histogram, Gauge
+   # monitoring/metrics_server.py
+   from http.server import BaseHTTPRequestHandler, HTTPServer
+   import json
    
-   job_duration_histogram = Histogram('executioner_job_duration_seconds', 
-                                    'Job execution duration',
-                                    ['job_id', 'status'])
+   class MetricsHandler(BaseHTTPRequestHandler):
+       def do_GET(self):
+           if self.path == '/metrics':
+               self.send_response(200)
+               self.send_header('Content-Type', 'application/json')
+               self.end_headers()
+               
+               # Export metrics as JSON
+               metrics = self.server.metrics_collector.get_current_metrics()
+               self.wfile.write(json.dumps(metrics).encode())
    ```
 
-3. **Create metrics middleware**
+3. **File-based metrics for integration**
+   ```python
+   # Write metrics to file that monitoring tools can read
+   # No external dependencies required
+   ```
 
 ### Phase 3: Structured Logging (1 week)
 
@@ -422,45 +481,102 @@ class ExecutionHistoryManager:
 
 ## 6. Configuration Management
 
-### Phase 1: Pydantic Models (1 week)
+### Phase 1: Configuration Models using stdlib (1 week)
 
 #### Tasks:
-1. **Define configuration models**
+1. **Define configuration models using dataclasses (stdlib in 3.7+)**
    ```python
    # config/models.py
-   # Note: Pydantic v1.x supports Python 3.6+
-   # Use pydantic>=1.8.0,<2.0 for Python 3.6 compatibility
-   from pydantic import BaseModel, Field, validator
+   # Use dataclasses with custom validation - no external packages
+   import sys
    from typing import List, Dict, Optional
+   from pathlib import Path
    
-   class JobConfig(BaseModel):
-       id: str = Field(..., min_length=1)
-       command: str = Field(..., min_length=1)
-       timeout: int = Field(3600, gt=0)
-       dependencies: List[str] = Field(default_factory=list)
-       env_variables: Dict[str, str] = Field(default_factory=dict)
-       retry_config: Optional[RetryConfig] = None
+   # Python 3.6 compatibility
+   if sys.version_info >= (3, 7):
+       from dataclasses import dataclass, field
+   else:
+       from dataclasses import dataclass, field  # backport - minimal package
+   
+   @dataclass
+   class JobConfig:
+       id: str
+       command: str
+       timeout: int = 3600
+       dependencies: List[str] = field(default_factory=list)
+       env_variables: Dict[str, str] = field(default_factory=dict)
        
-       @validator('dependencies')
-       def validate_dependencies(cls, v):
-           if len(v) != len(set(v)):
-               raise ValueError('Duplicate dependencies found')
-           return v
+       def validate(self) -> List[str]:
+           """Custom validation without external packages"""
+           errors = []
+           if not self.id:
+               errors.append("Job ID cannot be empty")
+           if not self.command:
+               errors.append("Command cannot be empty")
+           if self.timeout <= 0:
+               errors.append("Timeout must be positive")
+           if len(self.dependencies) != len(set(self.dependencies)):
+               errors.append("Duplicate dependencies found")
+           return errors
    
-   class WorkflowConfig(BaseModel):
+   @dataclass
+   class WorkflowConfig:
        application_name: str
-       working_dir: Path
+       working_dir: str
        jobs: List[JobConfig]
        
-       @validator('working_dir')
-       def validate_working_dir(cls, v):
-           if not v.exists():
-               raise ValueError(f'Working directory {v} does not exist')
-           return v
+       def validate(self) -> List[str]:
+           """Validate entire workflow configuration"""
+           errors = []
+           if not self.application_name:
+               errors.append("Application name required")
+           
+           # Check working directory
+           wd = Path(self.working_dir)
+           if not wd.exists():
+               errors.append(f"Working directory {self.working_dir} does not exist")
+           
+           # Validate all jobs
+           job_ids = set()
+           for job in self.jobs:
+               job_errors = job.validate()
+               errors.extend([f"Job {job.id}: {e}" for e in job_errors])
+               
+               if job.id in job_ids:
+                   errors.append(f"Duplicate job ID: {job.id}")
+               job_ids.add(job.id)
+           
+           return errors
    ```
 
-2. **Create configuration validator**
-3. **Add configuration builder**
+2. **Create configuration parser (stdlib json)**
+   ```python
+   # config/parser.py
+   import json
+   from typing import Dict, Any
+   
+   def parse_config(filepath: str) -> WorkflowConfig:
+       """Parse JSON config using stdlib only"""
+       with open(filepath, 'r') as f:
+           data = json.load(f)
+       
+       # Convert dict to dataclass
+       jobs = [JobConfig(**job_data) for job_data in data.get('jobs', [])]
+       config = WorkflowConfig(
+           application_name=data['application_name'],
+           working_dir=data['working_dir'],
+           jobs=jobs
+       )
+       
+       # Validate
+       errors = config.validate()
+       if errors:
+           raise ValueError(f"Configuration errors: {'; '.join(errors)}")
+       
+       return config
+   ```
+
+3. **Add configuration builder helpers**
 
 ### Phase 2: Configuration Templates (1 week)
 
@@ -654,42 +770,87 @@ class ExecutionHistoryManager:
            return run_id
    ```
 
-### Phase 2: REST API Layer (1 week)
+### Phase 2: REST API Layer using stdlib (1 week)
 
 #### Tasks:
-1. **Implement FastAPI application**
+1. **Implement HTTP API using stdlib http.server**
    ```python
-   # api/rest/app.py
-   from fastapi import FastAPI, HTTPException, Depends
-   from typing import Optional
+   # api/rest/server.py
+   from http.server import BaseHTTPRequestHandler, HTTPServer
+   import json
+   import urllib.parse
+   from typing import Dict, Any
    
-   app = FastAPI(title="Executioner API", version="2.0.0")
+   class ExecutionerAPIHandler(BaseHTTPRequestHandler):
+       """Simple REST API using stdlib only - no external frameworks"""
+       
+       def do_POST(self):
+           """Handle POST requests"""
+           if self.path == '/workflows':
+               # Submit new workflow
+               content_length = int(self.headers['Content-Length'])
+               post_data = self.rfile.read(content_length)
+               
+               try:
+                   config_data = json.loads(post_data)
+                   run_id = self.server.api_service.submit_workflow(config_data)
+                   
+                   response = {'run_id': run_id, 'status': 'submitted'}
+                   self._send_json_response(200, response)
+               except json.JSONDecodeError:
+                   self._send_json_response(400, {'error': 'Invalid JSON'})
+               except ValueError as e:
+                   self._send_json_response(400, {'error': str(e)})
+       
+       def do_GET(self):
+           """Handle GET requests"""
+           parsed = urllib.parse.urlparse(self.path)
+           
+           if parsed.path.startswith('/runs/'):
+               # Get run status
+               run_id = parsed.path.split('/')[-1]
+               status = self.server.api_service.get_run_status(run_id)
+               
+               if status:
+                   self._send_json_response(200, status)
+               else:
+                   self._send_json_response(404, {'error': 'Run not found'})
+           else:
+               self._send_json_response(404, {'error': 'Not found'})
+       
+       def _send_json_response(self, code: int, data: Dict[str, Any]):
+           """Helper to send JSON responses"""
+           self.send_response(code)
+           self.send_header('Content-Type', 'application/json')
+           self.end_headers()
+           self.wfile.write(json.dumps(data).encode())
    
-   @app.post("/workflows", response_model=WorkflowSubmission)
-   async def submit_workflow(
-       config: WorkflowConfig,
-       api: ExecutionerAPI = Depends(get_api_service)
-   ):
-       try:
-           run_id = await api.submit_workflow(config)
-           return WorkflowSubmission(run_id=run_id, status="submitted")
-       except ValidationError as e:
-           raise HTTPException(status_code=400, detail=str(e))
-   
-   @app.get("/runs/{run_id}", response_model=RunStatus)
-   async def get_run_status(
-       run_id: str,
-       api: ExecutionerAPI = Depends(get_api_service)
-   ):
-       status = await api.get_run_status(run_id)
-       if not status:
-           raise HTTPException(status_code=404, detail="Run not found")
-       return status
+   # Start server
+   def run_api_server(api_service, port=8080):
+       server = HTTPServer(('', port), ExecutionerAPIHandler)
+       server.api_service = api_service
+       server.serve_forever()
    ```
 
-2. **Add authentication/authorization**
-3. **Implement rate limiting**
-4. **Add OpenAPI documentation**
+2. **Add basic authentication (stdlib only)**
+   ```python
+   # Simple Basic Auth using stdlib
+   import base64
+   
+   def check_auth(self, auth_header):
+       if not auth_header or not auth_header.startswith('Basic '):
+           return False
+       
+       encoded = auth_header[6:]
+       decoded = base64.b64decode(encoded).decode('utf-8')
+       username, password = decoded.split(':', 1)
+       
+       # Check against configured users
+       return self.server.check_credentials(username, password)
+   ```
+
+3. **Simple rate limiting using stdlib**
+4. **Manual API documentation (no OpenAPI)**
 
 ### Phase 3: CLI Refactoring (1 week)
 
