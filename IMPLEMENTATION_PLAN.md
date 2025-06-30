@@ -103,13 +103,14 @@ class ExecutionHistoryManager:
         # Existing code continues to work
 ```
 
-### Phase 3: Add PostgreSQL Support (1 week)
+### Phase 3: Add Oracle Support (1 week)
 
 #### Tasks:
-1. Implement PostgreSQL adapter
-2. Add connection string configuration
-3. Update schema migrations for PostgreSQL
+1. Implement Oracle adapter using cx_Oracle
+2. Add Oracle connection configuration (DSN, user, password)
+3. Create Oracle-specific schema with proper data types
 4. Add database type detection
+5. Handle Oracle-specific SQL syntax (sequences, VARCHAR2, etc.)
 
 ---
 

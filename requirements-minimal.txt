@@ -1,0 +1,16 @@
+# Minimal Requirements for Executioner Modernization
+# Based on constraints: No ORM, Oracle instead of PostgreSQL, limited package approval
+
+# Current requirement
+pytest>=6.0.0
+
+# Python 3.6 compatibility (small, essential)
+dataclasses>=0.6; python_version < '3.7'
+typing_extensions>=3.7.4  # Just extends stdlib typing
+
+# Oracle Database Support (instead of PostgreSQL)
+cx_Oracle>=7.3.0  # Oracle database driver (supports Python 3.6+)
+# Note: Requires Oracle Instant Client to be installed separately
+# Download from: https://www.oracle.com/database/technologies/instant-client.html
+
+# That's it for absolutely essential packages!
