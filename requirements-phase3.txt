@@ -1,0 +1,26 @@
+# Phase 3: Async & API Requirements
+# Add for async execution and API layer
+# Includes everything from Phase 2 plus:
+
+# Phase 2 requirements
+-r requirements-phase2.txt
+
+# Async file operations
+aiofiles>=0.6.0
+
+# Async SQLite support
+aiosqlite>=0.17.0
+
+# API framework
+fastapi>=0.65.0
+uvicorn>=0.13.0
+
+# Modern HTTP client
+httpx>=0.18.0
+
+# API authentication (optional)
+python-jose[cryptography]>=3.2.0
+passlib[bcrypt]>=1.7.4
+
+# System resource monitoring
+psutil>=5.7.0

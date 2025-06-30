@@ -1,0 +1,168 @@
+# Proposed Requirements for Executioner Modernization
+# Python 3.6+ compatible versions
+
+# ====================
+# Core Dependencies
+# ====================
+
+# Python 3.6 Compatibility
+dataclasses>=0.6; python_version < '3.7'  # Backport for Python 3.6
+typing_extensions>=3.7.4  # Extended typing support for all Python versions
+contextvars>=2.4; python_version < '3.7'  # Async context for Python 3.6
+
+# ====================
+# 1. Database Design & Scalability
+# ====================
+
+# PostgreSQL Support
+psycopg2-binary>=2.8.6  # PostgreSQL adapter (supports Python 3.6+)
+# OR psycopg2>=2.8.6 if you want to compile from source
+
+# Connection Pooling
+sqlalchemy>=1.3.0,<2.0  # Database abstraction (1.3+ supports Python 3.6)
+databases>=0.4.0  # Async database support
+
+# ====================
+# 2. Separation of Concerns (no additional packages needed)
+# ====================
+
+# ====================
+# 3. Error Handling & Observability
+# ====================
+
+# Metrics and Monitoring
+prometheus-client>=0.8.0  # Prometheus metrics export
+structlog>=20.1.0  # Structured logging (supports Python 3.6+)
+
+# Tracing (optional)
+opentelemetry-api>=1.0.0  # OpenTelemetry for distributed tracing
+opentelemetry-sdk>=1.0.0
+opentelemetry-exporter-prometheus>=0.20b0
+
+# ====================
+# 4. Testing & Dependency Injection
+# ====================
+
+# Testing
+pytest>=6.0.0  # Testing framework (6.x supports Python 3.6)
+pytest-asyncio>=0.14.0  # Async test support
+pytest-cov>=2.10.0  # Coverage reporting
+pytest-mock>=3.3.0  # Mocking support
+faker>=8.0.0  # Test data generation
+
+# Dependency Injection (optional - can implement custom)
+injector>=0.18.0  # Lightweight DI framework (optional)
+# OR
+dependency-injector>=4.20.0  # More features but heavier
+
+# ====================
+# 5. Async/Await Implementation
+# ====================
+
+# Async Support
+aiofiles>=0.6.0  # Async file operations
+aiodns>=2.0.0  # Async DNS resolution
+aiohttp>=3.7.0  # Async HTTP client/server
+asyncio-throttle>=1.0.0  # Rate limiting for async
+aiosqlite>=0.17.0  # Async SQLite support
+
+# ====================
+# 6. Configuration Management
+# ====================
+
+# Configuration Validation
+pydantic>=1.8.0,<2.0  # Data validation (v1.x for Python 3.6)
+python-dotenv>=0.15.0  # .env file support
+pyyaml>=5.3.0  # YAML configuration support (optional)
+toml>=0.10.0  # TOML configuration support (optional)
+
+# ====================
+# 7. State Management (mostly covered by other dependencies)
+# ====================
+
+# State Machine (optional - can implement custom)
+transitions>=0.8.0  # State machine library
+
+# ====================
+# 8. API-First Design
+# ====================
+
+# REST API Framework
+fastapi>=0.65.0  # Modern API framework (supports Python 3.6+)
+uvicorn>=0.13.0  # ASGI server
+starlette>=0.14.0  # ASGI framework (FastAPI dependency)
+
+# API Documentation
+pydantic>=1.8.0,<2.0  # Already listed above
+
+# API Client
+httpx>=0.18.0  # Modern HTTP client with async support
+
+# Authentication (optional)
+python-jose[cryptography]>=3.2.0  # JWT tokens
+passlib[bcrypt]>=1.7.4  # Password hashing
+python-multipart>=0.0.5  # Form data support
+
+# ====================
+# 9. Resource Management
+# ====================
+
+# System Monitoring
+psutil>=5.7.0  # System and process utilities
+py-cpuinfo>=7.0.0  # CPU information
+
+# ====================
+# 10. Modern Python Features
+# ====================
+
+# Type Checking and Linting
+mypy>=0.910  # Static type checker
+black>=21.5b0  # Code formatter (supports Python 3.6+)
+isort>=5.8.0  # Import sorting
+flake8>=3.9.0  # Linting
+pylint>=2.8.0  # Additional linting (optional)
+
+# Documentation
+sphinx>=3.5.0  # Documentation generation
+sphinx-rtd-theme>=0.5.0  # ReadTheDocs theme
+
+# ====================
+# Development Tools
+# ====================
+
+# Development and Testing
+pre-commit>=2.13.0  # Git hooks for code quality
+tox>=3.20.0  # Testing across Python versions
+coverage>=5.5  # Code coverage
+bandit>=1.7.0  # Security linting
+
+# Performance Profiling (optional)
+memory-profiler>=0.58.0  # Memory profiling
+line-profiler>=3.2.0  # Line-by-line profiling
+
+# ====================
+# Current Dependencies (from existing requirements.txt)
+# ====================
+
+# These should be kept and potentially updated:
+# (Add current requirements here if they exist)
+
+# ====================
+# Optional but Recommended
+# ====================
+
+# Rich CLI output
+rich>=10.0.0  # Beautiful terminal formatting (Python 3.6+)
+click>=7.1.0  # CLI creation (alternative to argparse)
+
+# Data Processing (if needed)
+pandas>=1.1.0  # Data manipulation (if needed)
+numpy>=1.19.0  # Numerical computing (if needed)
+
+# ====================
+# Version Constraints Summary
+# ====================
+
+# All packages selected support Python 3.6+
+# Where possible, we use stable versions that have been around for a while
+# Upper bounds are set where breaking changes are known (e.g., pydantic<2.0)
