@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Executioner Workflow Editor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://unpkg.com/vue3-sfc-loader/dist/vue3-sfc-loader.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        [v-cloak] { display: none; }
+        .node-transition {
+            /* Removed transition for smoother dragging */
+        }
+        .connection-line {
+            stroke-width: 2;
+            fill: none;
+            opacity: 0.8;
+            marker-end: url(#arrowhead);
+            transition: all 0.2s ease;
+        }
+        .connection-line:hover {
+            stroke-width: 2.5;
+            opacity: 1;
+        }
+        .job-node {
+            cursor: move;
+        }
+        .job-node:hover {
+            filter: brightness(1.1);
+        }
+        .dragging {
+            opacity: 0.5;
+        }
+        .drop-zone {
+            min-height: 600px;
+        }
+        .drop-zone.drag-over {
+            background-color: #f3f4f6;
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <div id="app" v-cloak>
+        <div v-if="loading" class="flex items-center justify-center h-screen">
+            <div class="text-center">
+                <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto"></div>
+                <p class="mt-4 text-gray-600">Loading application...</p>
+            </div>
+        </div>
+        <app v-else></app>
+    </div>
+
+    <script>
+        const { loadModule } = window['vue3-sfc-loader'];
+
+        const options = {
+            moduleCache: {
+                vue: Vue
+            },
+            async getFile(url) {
+                const res = await fetch(url);
+                if (!res.ok) throw Object.assign(new Error(res.statusText + ' ' + url), { res });
+                return {
+                    getContentData: asBinary => res.text(),
+                }
+            },
+            addStyle(textContent) {
+                const style = Object.assign(document.createElement('style'), { textContent });
+                const ref = document.head.getElementsByTagName('style')[0] || null;
+                document.head.insertBefore(style, ref);
+            },
+        }
+
+        const { createApp } = Vue;
+        
+        const app = createApp({
+            data() {
+                return {
+                    loading: true
+                }
+            },
+            components: {
+                App: Vue.defineAsyncComponent({
+                    loader: () => loadModule('./App.vue', options),
+                    errorComponent: {
+                        template: '<div class="p-4 bg-red-100 text-red-700">Failed to load application. Check console for details.</div>'
+                    },
+                    delay: 200,
+                    timeout: 30000
+                })
+            },
+            mounted() {
+                this.loading = false;
+            },
+            errorCaptured(err, instance, info) {
+                console.error('Application error:', err);
+                console.error('Error info:', info);
+                return false;
+            }
+        });
+        
+        app.config.errorHandler = (err, instance, info) => {
+            console.error('Global error:', err);
+            console.error('Error info:', info);
+        };
+        
+        app.mount('#app');
+    </script>
+</body>
+</html>
