@@ -1,0 +1,44 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+[v-cloak] { 
+  display: none; 
+}
+
+.node-transition {
+  /* Removed transition for smoother dragging */
+}
+
+.connection-line {
+  stroke-width: 2;
+  fill: none;
+  opacity: 0.8;
+  marker-end: url(#arrowhead);
+  transition: all 0.2s ease;
+}
+
+.connection-line:hover {
+  stroke-width: 2.5;
+  opacity: 1;
+}
+
+.job-node {
+  cursor: move;
+}
+
+.job-node:hover {
+  filter: brightness(1.1);
+}
+
+.dragging {
+  opacity: 0.5;
+}
+
+.drop-zone {
+  min-height: 600px;
+}
+
+.drop-zone.drag-over {
+  background-color: #f3f4f6;
+}
