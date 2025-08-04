@@ -63,12 +63,9 @@ class JobRunner(JobStatusMixin):
         job_logger, job_file_handler, job_log_path = self.setup_job_logger(self.job_id)
         fail_reason = None
         try:
-            # Log job start with all context in one message
-            self.main_logger.info(f"Job '{self.job_id}' started", extra={
-                'job_id': self.job_id, 
-                'command': command,
-                'event': 'job_start'
-            })
+            # User-facing job start
+            self.main_logger.info(f"Starting job '{self.job_id}'")
+            self.main_logger.info(f"Running job: {self.job_id} Command: {command}")
             if dry_run:
                 print(f"[DRY RUN] Would execute job: {self.job_id} - Command: {command[:60]}{'...' if len(command) > 60 else ''}")
                 if return_reason:
@@ -95,7 +92,7 @@ class JobRunner(JobStatusMixin):
             attempt = 0
             start_time = time.time()
             total_retry_time = 0
-            
+
             while attempt <= max_retries:
                 # Check total retry time limit (skip on first attempt)
                 if attempt > 0 and total_retry_time > max_retry_time:
@@ -104,12 +101,12 @@ class JobRunner(JobStatusMixin):
                     if return_reason:
                         return False, fail_reason
                     return False
-                
+
                 # Log retry attempt
                 if attempt > 0:
                     retry_msg = f"Retry attempt {attempt}/{max_retries} for job {self.job_id}"
                     self.main_logger.info(retry_msg)
-                
+
                 # Execute the job
                 attempt_start = time.time()
                 attempt_start_dt = datetime.datetime.now()
@@ -121,9 +118,9 @@ class JobRunner(JobStatusMixin):
                     status = "ERROR"
                     job_logger.error(f"Exception during job execution: {e}")
                     fail_reason = f"Exception during execution: {e}"
-                
+
                 duration = round(time.time() - attempt_start, 2)
-                
+
                 # Record attempt info
                 attempt_info = {
                     "attempt": attempt + 1,  # Human-readable attempt number
@@ -134,7 +131,7 @@ class JobRunner(JobStatusMixin):
                     "status": status
                 }
                 retry_history.append(attempt_info)
-                
+
                 # Handle successful execution
                 if status == "SUCCESS":
                     # Post-checks
@@ -154,33 +151,27 @@ class JobRunner(JobStatusMixin):
                                 return True, None
                             return True
                     else:
-                        self.main_logger.info(f"Job '{self.job_id}' completed", extra={
-                            'job_id': self.job_id, 
-                            'command': command,
-                            'duration': round(duration, 2),
-                            'status': 'SUCCESS',
-                            'exit_code': exit_code,
-                            'event': 'job_complete'
-                        })
+                        msg = f"Job '{self.job_id}' completed successfully in {duration:.2f} seconds"
+                        self.main_logger.info(msg)
                         self.mark_success(self.job_id, duration=duration, start_time=attempt_start_dt.strftime('%Y-%m-%d %H:%M:%S'))
                         if return_reason:
                             return True, None
                         return True
-                
+
                 # Job failed - determine if we should retry
                 if attempt < max_retries:
                     should_retry = False
-                    
+
                     # Check if status allows retry
                     if status in retry_on_status:
                         should_retry = True
                         self.main_logger.debug(f"Job {self.job_id} status '{status}' is in retry_on_status list")
-                    
+
                     # Check if exit code allows retry
                     if exit_code is not None and exit_code in retry_on_exit_codes:
                         should_retry = True
                         self.main_logger.debug(f"Job {self.job_id} exit code {exit_code} is in retry_on_exit_codes list")
-                    
+
                     if should_retry:
                         # Calculate retry delay
                         base_delay = retry_delay * (retry_backoff ** attempt)
@@ -189,7 +180,7 @@ class JobRunner(JobStatusMixin):
                             current_delay = max(0.1, base_delay * jitter_factor)
                         else:
                             current_delay = base_delay
-                        
+
                         self.main_logger.info(f"Will retry job {self.job_id} in {current_delay:.1f} seconds (attempt {attempt+1}/{max_retries})")
                         time.sleep(current_delay)
                         attempt += 1
@@ -207,7 +198,7 @@ class JobRunner(JobStatusMixin):
                     if not fail_reason:
                         fail_reason = f"Job failed after {attempt + 1} attempts (status: {status}, exit code: {exit_code})"
                     break
-            
+
             # Job failed - update status and return
             if not continue_on_error:
                 self.main_logger.error("Stopping execution.")
@@ -337,5 +328,5 @@ class JobRunner(JobStatusMixin):
             except Exception as e:
                 job_logger.error(f"Error running {phase}-check {name}: {e}")
                 return False
-        return True 
+        return True
 

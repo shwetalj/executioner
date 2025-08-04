@@ -29,7 +29,7 @@ class ExecutionHistoryManager:
             """)
             last_run_id = cursor.fetchone()[0]
             return (last_run_id + 1) if last_run_id is not None else 1
-    
+
     @handle_db_errors(lambda self: self.logger)
     def create_run_summary(self, run_id, application_name, start_time, total_jobs, working_dir=None):
         """Create a new run summary entry"""
@@ -50,18 +50,18 @@ class ExecutionHistoryManager:
                     if cursor.fetchone()[0] > 0:
                         return  # Already exists, that's fine
                 raise  # Re-raise if it's a different error
-    
+
     @handle_db_errors(lambda self: self.logger)
     def update_run_summary(self, run_id, end_time, status, completed_jobs, failed_jobs, skipped_jobs, exit_code):
         """Update run summary with final results"""
         with db_connection(self.logger) as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                UPDATE run_summary 
-                SET end_time = ?, status = ?, completed_jobs = ?, 
+                UPDATE run_summary
+                SET end_time = ?, status = ?, completed_jobs = ?,
                     failed_jobs = ?, skipped_jobs = ?, exit_code = ?
                 WHERE run_id = ?
-            """, (end_time.strftime('%Y-%m-%d %H:%M:%S'), status, 
+            """, (end_time.strftime('%Y-%m-%d %H:%M:%S'), status,
                   completed_jobs, failed_jobs, skipped_jobs, exit_code, run_id))
             conn.commit()
 
@@ -82,23 +82,23 @@ class ExecutionHistoryManager:
             if removed_jobs:
                 self.logger.warning(f"Jobs from previous run not in current config: {', '.join(removed_jobs)}")
         return job_statuses
-    
+
     @handle_db_errors(lambda self: self.logger)
     def get_recent_runs(self, limit=20, app_name=None):
         """Get recent runs with summary information"""
         runs = []
         with db_connection(self.logger) as conn:
             cursor = conn.cursor()
-            
+
             # First check if run_summary table exists
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='run_summary'")
             has_run_summary = cursor.fetchone() is not None
-            
+
             if has_run_summary:
                 # Use run_summary table for accurate timing
                 if app_name:
                     query = """
-                    SELECT 
+                    SELECT
                         rs.run_id,
                         rs.application_name,
                         rs.start_time,
@@ -116,7 +116,7 @@ class ExecutionHistoryManager:
                     cursor.execute(query, (app_name, limit))
                 else:
                     query = """
-                    SELECT 
+                    SELECT
                         rs.run_id,
                         rs.application_name,
                         rs.start_time,
@@ -131,14 +131,14 @@ class ExecutionHistoryManager:
                     LIMIT ?
                     """
                     cursor.execute(query, (limit,))
-                    
+
                 for row in cursor.fetchall():
                     run_id, app_name, start_time, end_time, status, total_jobs, successful_jobs, failed_jobs, skipped_jobs = row
-                    
+
                     # If this run isn't in run_summary but is in job_history, fall back to old method
                     if not start_time:
                         continue
-                        
+
                     # Calculate duration if both times exist
                     duration = 'N/A'
                     if start_time and end_time:
@@ -153,12 +153,12 @@ class ExecutionHistoryManager:
                             duration = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
                         except:
                             duration = 'N/A'
-                    
+
                     # Format job summary
                     job_summary = f"{successful_jobs}/{total_jobs}"
                     if failed_jobs > 0:
                         job_summary += f" ({failed_jobs} failed)"
-                    
+
                     runs.append({
                         'run_id': run_id,
                         'application_name': app_name or 'Unknown',
@@ -171,11 +171,11 @@ class ExecutionHistoryManager:
                         'failed_jobs': failed_jobs,
                         'skipped_jobs': skipped_jobs
                     })
-            
+
             # Also get runs from job_history that might not be in run_summary yet
             if app_name:
                 query = """
-                SELECT 
+                SELECT
                     jh.run_id,
                     jh.application_name,
                     MIN(jh.last_run) as start_time,
@@ -194,7 +194,7 @@ class ExecutionHistoryManager:
                 cursor.execute(query, (app_name, limit))
             else:
                 query = """
-                SELECT 
+                SELECT
                     jh.run_id,
                     jh.application_name,
                     MIN(jh.last_run) as start_time,
@@ -212,10 +212,10 @@ class ExecutionHistoryManager:
                 LIMIT ?
                 """
                 cursor.execute(query, (limit,))
-            
+
             for row in cursor.fetchall():
                 run_id, app_name, start_time, end_time, total_jobs, successful_jobs, failed_jobs, skipped_jobs = row
-                
+
                 # Determine overall status
                 if failed_jobs > 0:
                     status = 'FAILED'
@@ -225,7 +225,7 @@ class ExecutionHistoryManager:
                     status = 'PARTIAL'
                 else:
                     status = 'PENDING'
-                
+
                 # Calculate duration if both times exist
                 duration = 'N/A'
                 if start_time and end_time:
@@ -240,12 +240,12 @@ class ExecutionHistoryManager:
                         duration = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
                     except:
                         duration = 'N/A'
-                
+
                 # Format job summary
                 job_summary = f"{successful_jobs}/{total_jobs}"
                 if failed_jobs > 0:
                     job_summary += f" ({failed_jobs} failed)"
-                
+
                 runs.append({
                     'run_id': run_id,
                     'application_name': app_name or 'Unknown',
@@ -258,11 +258,11 @@ class ExecutionHistoryManager:
                     'failed_jobs': failed_jobs,
                     'skipped_jobs': skipped_jobs
                 })
-        
+
         # Sort runs by run_id descending and limit to requested amount
         runs.sort(key=lambda x: x['run_id'], reverse=True)
         return runs[:limit]
-    
+
     @handle_db_errors(lambda self: self.logger)
     def get_job_statuses_for_run(self, run_id, job_ids=None):
         """Get job statuses for a specific run"""
@@ -276,60 +276,60 @@ class ExecutionHistoryManager:
             else:
                 query = "SELECT id, status FROM job_history WHERE run_id = ?"
                 cursor.execute(query, (run_id,))
-            
+
             for row in cursor.fetchall():
                 statuses[row[0]] = row[1]
-        
+
         return statuses
-    
+
     @handle_db_errors(lambda self: self.logger)
     def mark_jobs_successful(self, run_id, job_ids):
         """Mark specified jobs as successful"""
         success_count = 0
         with db_connection(self.logger) as conn:
             cursor = conn.cursor()
-            
+
             for job_id in job_ids:
                 try:
                     # Update the job status to SUCCESS
                     cursor.execute("""
-                        UPDATE job_history 
+                        UPDATE job_history
                         SET status = 'SUCCESS',
                             last_run = CURRENT_TIMESTAMP
                         WHERE run_id = ? AND id = ? AND status IN ('FAILED', 'ERROR', 'TIMEOUT')
                     """, (run_id, job_id))
-                    
+
                     if cursor.rowcount > 0:
                         success_count += 1
                         self.logger.info(f"Marked job {job_id} as SUCCESS for run {run_id}")
-                    
+
                 except sqlite3.Error as e:
                     self.logger.error(f"Failed to mark job {job_id} as successful: {e}")
-            
+
             conn.commit()
-        
+
         return success_count
-    
+
     @handle_db_errors(lambda self: self.logger)
     def get_run_details(self, run_id):
         """Get detailed information about a specific run including all job statuses"""
         with db_connection(self.logger) as conn:
             cursor = conn.cursor()
-            
+
             # First try to get info from run_summary table
             cursor.execute("""
-                SELECT application_name, start_time, end_time, status, 
+                SELECT application_name, start_time, end_time, status,
                        total_jobs, completed_jobs, failed_jobs, skipped_jobs, working_dir
                 FROM run_summary
                 WHERE run_id = ?
             """, (run_id,))
-            
+
             summary_row = cursor.fetchone()
-            
+
             if summary_row:
                 # Use run_summary data
                 app_name, start_time, end_time, status, total_jobs, completed_jobs, failed_jobs, skipped_jobs, working_dir = summary_row
-                
+
                 # Calculate duration
                 duration = 'N/A'
                 if start_time and end_time:
@@ -347,7 +347,7 @@ class ExecutionHistoryManager:
             else:
                 # Fallback to old method for backward compatibility
                 query = """
-                SELECT 
+                SELECT
                     application_name,
                     MIN(last_run) as start_time,
                     MAX(last_run) as end_time,
@@ -359,16 +359,16 @@ class ExecutionHistoryManager:
                 WHERE run_id = ?
                 GROUP BY application_name
                 """
-                
+
                 cursor.execute(query, (run_id,))
                 row = cursor.fetchone()
-                
+
                 if not row:
                     return None
-                
+
                 app_name, start_time, end_time, total_jobs, successful_jobs, failed_jobs, skipped_jobs = row
                 completed_jobs = successful_jobs
-                
+
                 # Determine overall status
                 if failed_jobs > 0:
                     status = 'FAILED'
@@ -378,7 +378,7 @@ class ExecutionHistoryManager:
                     status = 'PARTIAL'
                 else:
                     status = 'PENDING'
-                
+
                 # Calculate duration (will likely be N/A for old data)
                 duration = 'N/A'
                 if start_time and end_time:
@@ -393,10 +393,10 @@ class ExecutionHistoryManager:
                     except Exception as e:
                         self.logger.debug(f"Error calculating duration from job_history: {e}")
                         duration = 'N/A'
-                
+
                 # No working_dir available in fallback mode
                 working_dir = None
-            
+
             run_info = {
                 'run_id': run_id,
                 'application_name': app_name,
@@ -410,7 +410,7 @@ class ExecutionHistoryManager:
                 'skipped_jobs': skipped_jobs,
                 'working_dir': working_dir
             }
-            
+
             # Get individual job details
             cursor.execute("""
                 SELECT id, description, command, status, last_run, duration_seconds
@@ -418,11 +418,11 @@ class ExecutionHistoryManager:
                 WHERE run_id = ?
                 ORDER BY last_run
             """, (run_id,))
-            
+
             jobs = []
             for job_row in cursor.fetchall():
                 job_id, description, command, job_status, last_run, duration_seconds = job_row
-                
+
                 # Calculate end time from start time and duration
                 end_time = None
                 if last_run and duration_seconds is not None:
@@ -433,7 +433,7 @@ class ExecutionHistoryManager:
                         end_time = end_dt.strftime('%Y-%m-%d %H:%M:%S')
                     except:
                         pass
-                
+
                 jobs.append({
                     'id': job_id,
                     'description': description or '',
@@ -443,7 +443,7 @@ class ExecutionHistoryManager:
                     'duration_seconds': duration_seconds,
                     'end_time': end_time
                 })
-            
+
             return {
                 'run_info': run_info,
                 'jobs': jobs
@@ -495,26 +495,26 @@ class ExecutionHistoryManager:
             cursor.execute("PRAGMA table_info(job_history)")
             columns = [col[1] for col in cursor.fetchall()]
             columns_to_add = []
-            
+
             # Check which allowed columns need to be added
             for col_name, (col_type, col_constraint) in self.ALLOWED_COLUMNS.items():
                 if col_name in ['retry_history', 'last_exit_code', 'retry_count', 'last_error']:
                     if col_name not in columns:
                         columns_to_add.append((col_name, col_type, col_constraint))
-            
+
             if columns_to_add:
                 for col_name, col_type, col_constraint in columns_to_add:
                     # Validate column name and type against whitelist
                     if col_name not in self.ALLOWED_COLUMNS:
                         self.logger.error(f"Attempted to add non-whitelisted column: {col_name}")
                         continue
-                    
+
                     # Build SQL with validated components
                     if col_constraint:
                         alter_sql = f"ALTER TABLE job_history ADD COLUMN {col_name} {col_type} {col_constraint}"
                     else:
                         alter_sql = f"ALTER TABLE job_history ADD COLUMN {col_name} {col_type}"
-                    
+
                     try:
                         cursor.execute(alter_sql)
                         self.logger.info(f"Added missing column to job_history: {col_name} {col_type}")
@@ -548,7 +548,7 @@ class ExecutionHistoryManager:
                 if reason:
                     cursor.execute(
                         """
-                        UPDATE job_history 
+                        UPDATE job_history
                         SET retry_count = ?, retry_history = ?, last_error = ?
                         WHERE run_id = ? AND id = ?
                         """,
@@ -557,7 +557,7 @@ class ExecutionHistoryManager:
                 else:
                     cursor.execute(
                         """
-                        UPDATE job_history 
+                        UPDATE job_history
                         SET retry_count = ?, retry_history = ?
                         WHERE run_id = ? AND id = ?
                         """,
@@ -598,5 +598,5 @@ class ExecutionHistoryManager:
                     return int(row[0])
             except sqlite3.OperationalError as e:
                 self.logger.debug(f"Error selecting last_exit_code: {e}")
-            return None 
+            return None
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-#!/usr/bin/env agspython3
+#!/usr/bin/env python3
 import sys
 import json
 import re

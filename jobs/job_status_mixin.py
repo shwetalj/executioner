@@ -28,5 +28,5 @@ class JobStatusMixin:
     def should_retry(self, job, last_status, retry_count):
         retry_on_status = job.get("retry_on_status", ["ERROR", "FAILED", "TIMEOUT"])
         max_retries = job.get("max_retries", 0)
-        return last_status in retry_on_status and retry_count < max_retries 
+        return last_status in retry_on_status and retry_count < max_retries
 

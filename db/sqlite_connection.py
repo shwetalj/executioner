@@ -221,8 +221,8 @@ def init_db(verbose=False, logger=None):
                             data_migration(conn, cursor)
                         cursor.execute(
                             """
-                            INSERT INTO schema_version 
-                            (version, description, migration_hash, script_name, rollback_info) 
+                            INSERT INTO schema_version
+                            (version, description, migration_hash, script_name, rollback_info)
                             VALUES (?, ?, ?, ?, ?)
                             """,
                             (version, description, migration_hash, f"migration_v{version}", rollback)
@@ -273,4 +273,6 @@ def init_db(verbose=False, logger=None):
         except sqlite3.Error as rollback_error:
             logger.error(f"Failed to rollback transaction: {rollback_error}")
         logger.error(f"Unexpected error during database initialization: {e}")
-        sys.exit(1) 
+        sys.exit(1)
+
+

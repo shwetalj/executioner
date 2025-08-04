@@ -44,11 +44,10 @@ from jobs.execution_orchestrator import ExecutionOrchestrator
 from jobs.summary_reporter import SummaryReporter
 
 class JobExecutioner:
-    def __init__(self, config_file: str, working_dir: str = None, json_logs: bool = False):
+    def __init__(self, config_file: str, working_dir: str = None):
         # Store the config file path and working directory for later use
         self.config_file = config_file
         self.working_dir = working_dir
-        self.json_logs = json_logs
         # Set up a minimal logger for early errors
         # self.logger = logging.getLogger('executioner')
         # self.logger.handlers.clear()
@@ -68,10 +67,10 @@ class JobExecutioner:
         # Initialize necessary attributes for logging setup
         self.application_name = self.config.get("application_name",
             os.path.splitext(os.path.basename(config_file))[0])
-        
+
         # Validate configuration schema before accessing jobs
         # Use a temporary logger for validation errors
-        temp_logger = setup_logging(self.application_name, "main", json_logs=False)
+        temp_logger = setup_logging(self.application_name, "main")
         validate_config(self.config, temp_logger)
         try:
             self.jobs: Dict[str, Dict] = {job["id"]: job for job in self.config["jobs"]}
@@ -81,16 +80,16 @@ class JobExecutioner:
         if len(self.jobs) != len(self.config["jobs"]):
             print("Duplicate job IDs found in configuration")
             sys.exit(1)
-        
+
         # Initialize ExecutionHistoryManager and StateManager
         self.job_history = ExecutionHistoryManager(self.jobs, self.application_name, None, temp_logger)
         self.state_manager = StateManager(self.jobs, self.application_name, self.job_history, temp_logger)
-        
+
         # Initialize run and set up logger with run_id
         self.run_id = self.state_manager.initialize_run()
-        self.logger = setup_logging(self.application_name, self.run_id, self.json_logs)
+        self.logger = setup_logging(self.application_name, self.run_id)
         self.job_history.set_logger(self.logger)
-        
+
         # Email notification settings
         self.email_address = self.config.get("email_address", "")
         self.email_on_success = self.config.get("email_on_success", False)
@@ -124,14 +123,14 @@ class JobExecutioner:
         # Interpolate application-level environment variables
         self.app_env_variables = interpolate_env_vars(self.app_env_variables, self.logger)
         self.cli_env_variables = {}  # Will be set by main executioner
-        
+
         # Shell environment inheritance setting (default to True for backward compatibility)
         self.inherit_shell_env = self.config.get("inherit_shell_env", True)
         self.shell_env = filter_shell_env(self.inherit_shell_env, self.logger)
-        
+
         # Handle dependency plugins if specified
         self.dependency_plugins = self.config.get("dependency_plugins", [])
-        
+
         # Job and dependency setup
         self.jobs: Dict[str, Dict] = {job["id"]: job for job in self.config["jobs"]}
         if len(self.jobs) != len(self.config["jobs"]):
@@ -141,11 +140,11 @@ class JobExecutioner:
 
         # Initialize queue manager for job state and queue operations
         self.queue_manager = QueueManager(self.dependency_manager, self.logger)
-        
+
         # Update state manager with logger
         self.state_manager.logger = self.logger
-        
-        
+
+
         # Initialize execution orchestrator for execution coordination
         self.execution_orchestrator = ExecutionOrchestrator(
             jobs=self.jobs,
@@ -158,10 +157,10 @@ class JobExecutioner:
             max_workers=self.max_workers,
             parallel=self.parallel
         )
-        
+
         # Initialize summary reporter for execution results
         self.summary_reporter = SummaryReporter(self.application_name, config_file)
-        
+
         # Threading primitives (kept for backward compatibility and executor management)
         self.lock = self.queue_manager.lock  # Use queue manager's lock
         self.job_completed_condition = self.queue_manager.job_completed_condition
@@ -182,103 +181,103 @@ class JobExecutioner:
     def job_queue(self) -> Queue:
         """Access to the job queue."""
         return self.queue_manager.job_queue
-    
+
     @property
     def completed_jobs(self) -> Set[str]:
         """Access to completed jobs set."""
         return self.queue_manager.completed_jobs
-    
+
     @property
     def failed_jobs(self) -> Set[str]:
         """Access to failed jobs set."""
         return self.queue_manager.failed_jobs
-    
+
     @property
     def failed_job_reasons(self) -> Dict[str, str]:
         """Access to failed job reasons."""
         return self.queue_manager.failed_job_reasons
-    
+
     @property
     def queued_jobs(self) -> Set[str]:
         """Access to queued jobs set."""
         return self.queue_manager.queued_jobs
-    
+
     @property
     def active_jobs(self) -> Set[str]:
         """Access to active jobs set."""
         return self.queue_manager.active_jobs
-    
+
     @property
     def future_to_job_id(self) -> Dict[Future, str]:
         """Access to future-to-job-id mapping."""
         return self.queue_manager.future_to_job_id
-    
+
     @property
     def skip_jobs(self) -> Set[str]:
         """Access to skip jobs set."""
         return self.queue_manager.skip_jobs
-    
+
     @skip_jobs.setter
     def skip_jobs(self, value: Set[str]) -> None:
         """Set skip jobs."""
         self.queue_manager.set_skip_jobs(value)
-    
+
     # Properties for backward compatibility - delegate to state manager
     @property
     def exit_code(self) -> int:
         """Access to exit code."""
         return self.state_manager.exit_code
-    
+
     @exit_code.setter
     def exit_code(self, value: int) -> None:
         """Set exit code."""
         self.state_manager.set_exit_code(value)
-    
+
     @property
     def start_time(self) -> Optional[datetime.datetime]:
         """Access to start time."""
         return self.state_manager.start_time
-    
+
     @start_time.setter
     def start_time(self, value: Optional[datetime.datetime]) -> None:
         """Set start time."""
         self.state_manager.start_time = value
-    
+
     @property
     def end_time(self) -> Optional[datetime.datetime]:
         """Access to end time."""
         return self.state_manager.end_time
-    
+
     @end_time.setter
     def end_time(self, value: Optional[datetime.datetime]) -> None:
         """Set end time."""
         self.state_manager.end_time = value
-    
+
     @property
     def continue_on_error(self) -> bool:
         """Access to continue on error flag."""
         return self.state_manager.continue_on_error
-    
+
     @continue_on_error.setter
     def continue_on_error(self, value: bool) -> None:
         """Set continue on error flag."""
         self.state_manager.continue_on_error = value
-    
+
     @property
     def dry_run(self) -> bool:
         """Access to dry run flag."""
         return self.state_manager.dry_run
-    
+
     @dry_run.setter
     def dry_run(self, value: bool) -> None:
         """Set dry run flag."""
         self.state_manager.dry_run = value
-    
+
     @property
     def interrupted(self) -> bool:
         """Access to interrupted flag."""
         return self.state_manager.interrupted
-    
+
     @interrupted.setter
     def interrupted(self, value: bool) -> None:
         """Set interrupted flag."""
@@ -318,7 +317,7 @@ class JobExecutioner:
         job_log_dir = job.get("log_dir", Config.LOG_DIR)
         os.makedirs(job_log_dir, exist_ok=True)
         job_log_path = os.path.join(job_log_dir, f"executioner.{self.application_name}.job-{job_id}.run-{self.run_id}.log")
-        job_logger, job_file_handler = setup_job_logger(self.application_name, self.run_id, job_id, job_log_path, self.json_logs)
+        job_logger, job_file_handler = setup_job_logger(self.application_name, self.run_id, job_id, job_log_path)
         job_description = job.get('description', '')
         job_command = job['command']
         job_logger.info(f"Executing job - {job_id}: {job_command}")
@@ -462,7 +461,7 @@ class JobExecutioner:
         end_date = timing_info["end_time_str"]
         status = self.state_manager.get_run_status()
         start_time_str = self.start_time.strftime('%Y-%m-%d %H:%M:%S')
-        
+
         # Print main summary
         self.summary_reporter.print_execution_summary(
             run_id=self.run_id,
@@ -475,7 +474,7 @@ class JobExecutioner:
             skip_jobs=self.skip_jobs,
             exit_code=self.exit_code
         )
-        
+
         # Calculate skipped jobs due to dependencies
         skipped_due_to_deps = self.summary_reporter.calculate_skipped_due_to_deps(
             jobs=self.jobs,
@@ -484,7 +483,7 @@ class JobExecutioner:
             skip_jobs=self.skip_jobs,
             dependency_manager=self.dependency_manager
         )
-        
+
         # Print detailed job summaries
         self.summary_reporter.print_failed_jobs_summary(
             failed_jobs=self.failed_jobs,
@@ -492,12 +491,12 @@ class JobExecutioner:
             job_log_paths=self.job_log_paths,
             failed_job_reasons=self.failed_job_reasons
         )
-        
+
         self.summary_reporter.print_skipped_jobs_summary(
             skipped_due_to_deps=skipped_due_to_deps,
             jobs=self.jobs
         )
-        
+
         # Print resume instructions or run info
         failed_job_order = [j["id"] for j in self.config["jobs"] if j["id"] in self.failed_jobs]
         self.summary_reporter.print_resume_instructions(
@@ -506,7 +505,7 @@ class JobExecutioner:
             failed_job_order=failed_job_order,
             has_skipped_deps=bool(skipped_due_to_deps)
         )
-        
+
         # Print final divider
         self.summary_reporter.print_final_divider()
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+
 """
 Executioner - A job execution engine with dependency support
 
@@ -72,7 +73,7 @@ SIMPLE_CONFIG = """{
             "command": "python download_data.py"
         },
         {
-            "id": "job2", 
+            "id": "job2",
             "description": "Second job - processes data",
             "command": "python process_data.py",
             "dependencies": ["job1"]
@@ -228,23 +229,23 @@ See README.md and docs/ directory in the project repository.
     parser.add_argument("-c", "--config", default="jobs_config.json", help="Path to job configuration file (default: jobs_config.json)")
     parser.add_argument("--simple-config", action="store_true", help="Display a simple, minimal configuration example for getting started")
     parser.add_argument("--sample-config", action="store_true", help="Display a sample configuration file with all available options including security policies, retry settings, environment variables, and more")
-    
+
     # Execution control options
     execution_group = parser.add_argument_group("Execution control")
     execution_group.add_argument("--dry-run", action="store_true", help="Show what would be executed without actually running jobs")
     execution_group.add_argument("--skip", action='append', metavar="JOB_IDS", help="Skip specified job IDs (comma-separated or multiple --skip)")
     execution_group.add_argument("--env", action='append', help="Set environment variables (KEY=value or KEY1=val1,KEY2=val2)")
-    
+
     # Failure handling options
     failure_group = parser.add_argument_group("Failure handling")
     failure_group.add_argument("--continue-on-error", action="store_true", help="Continue executing remaining jobs even if a job fails")
-    
+
     # Parallel execution options
     parallel_group = parser.add_argument_group("Parallel execution")
     parallel_group.add_argument("--parallel", action="store_true", help="Enable parallel job execution (overrides config setting)")
     parallel_group.add_argument("--workers", type=int, metavar="N", help="Number of parallel workers (default: from config or 1)")
     parallel_group.add_argument("--sequential", action="store_true", help="Force sequential execution even if config enables parallel")
-    
+
     # Resume and recovery options
     resume_group = parser.add_argument_group("Resume and recovery")
     resume_group.add_argument("--resume-from", type=int, metavar="RUN_ID", help="Resume execution from a previous run ID")
@@ -252,26 +253,25 @@ See README.md and docs/ directory in the project repository.
     resume_group.add_argument("--mark-success", action="store_true", help="Mark specific jobs as successful in a previous run (use with -r and -j)")
     resume_group.add_argument("-r", "--run-id", type=int, metavar="RUN_ID", help="Run ID for --mark-success operation")
     resume_group.add_argument("-j", "--jobs", metavar="JOB_IDS", help="Comma-separated job IDs for --mark-success operation")
-    
+
     # History and reporting options
     history_group = parser.add_argument_group("History and reporting")
-    history_group.add_argument("--list-runs", nargs='?', const=True, metavar="APP_NAME", 
+    history_group.add_argument("--list-runs", nargs='?', const=True, metavar="APP_NAME",
                              help="List recent execution history (optionally filtered by app name) and exit")
     history_group.add_argument("--show-run", type=int, metavar="RUN_ID", help="Show detailed job status for a specific run ID")
-    
+
     # Logging and debugging options
     logging_group = parser.add_argument_group("Logging and debugging")
     logging_group.add_argument("--debug", action="store_true", help="Enable debug logging (most detailed output)")
     logging_group.add_argument("--verbose", action="store_true", help="Enable verbose logging (INFO level messages)")
     logging_group.add_argument("--visible", action="store_true", help="Display all environment variables for each job before execution")
-    logging_group.add_argument("--json-logs", action="store_true", help="Output logs in structured JSON format")
 
     if len(sys.argv) == 1:
         parser.print_help(sys.stderr)
         sys.exit(1)
 
     args = parser.parse_args()
-    
+
     # Set logging level based on --debug/--verbose
     if args.debug:
         logging_level = logging.DEBUG
@@ -302,7 +302,7 @@ See README.md and docs/ directory in the project repository.
         print("-" * 80)
         print("Copy and modify as needed for your own pipeline.")
         sys.exit(0)
-    
+
     # Handle --list-runs flag
     if args.list_runs is not None:  # Will be True or a string (app name) when specified
         # Initialize database before querying
@@ -310,15 +310,15 @@ See README.md and docs/ directory in the project repository.
         ensure_log_dir()
         init_db(verbose=args.verbose)
         from jobs.execution_history_manager import ExecutionHistoryManager
-        
+
         # Create a temporary job history manager just for querying
         temp_logger = setup_logging("executioner", "query")
         job_history = ExecutionHistoryManager({}, None, None, temp_logger)
-        
+
         # Get recent runs, optionally filtered by app name
         app_filter = args.list_runs if isinstance(args.list_runs, str) else None
         recent_runs = job_history.get_recent_runs(limit=20, app_name=app_filter)
-        
+
         if not recent_runs:
             if app_filter:
                 print(f"\nNo execution history found for application '{app_filter}'.")
@@ -327,7 +327,7 @@ See README.md and docs/ directory in the project repository.
                 print("\nNo execution history found.")
                 print("Run executioner with a config file to create execution history.")
             sys.exit(0)
-        
+
         # Display the runs
         if app_filter:
             print(f"\nRecent Execution History for '{app_filter}':")
@@ -336,7 +336,7 @@ See README.md and docs/ directory in the project repository.
         print("=" * 100)
         print(f"{'Run ID':>7} | {'Application':20} | {'Status':10} | {'Start Time':19} | {'Duration':>8} | {'Jobs':>12}")
         print("-" * 100)
-        
+
         for run in recent_runs:
             run_id = run['run_id']
             app_name = run['application_name'][:20]
@@ -344,7 +344,7 @@ See README.md and docs/ directory in the project repository.
             start_time = run['start_time'] or 'N/A'
             duration = run['duration'] or 'N/A'
             job_summary = run['job_summary']
-            
+
             # Color code status (only if terminal supports it)
             if sys.stdout.isatty() and os.environ.get('TERM') != 'dumb':
                 if status == 'SUCCESS':
@@ -355,13 +355,13 @@ See README.md and docs/ directory in the project repository.
                     status_display = f"\033[33m{status:10}\033[0m"  # Yellow
             else:
                 status_display = f"{status:10}"
-            
+
             print(f"{run_id:>7} | {app_name:20} | {status_display} | {start_time:19} | {duration:>8} | {job_summary:>12}")
-        
+
         print("\nTo resume a failed run: executioner.py -c <config> --resume-from <RUN_ID>")
         print("To resume only failed jobs: executioner.py -c <config> --resume-from <RUN_ID> --resume-failed-only")
         sys.exit(0)
-    
+
     # Handle --show-run flag
     if args.show_run:
         if args.show_run <= 0:
@@ -372,19 +372,19 @@ See README.md and docs/ directory in the project repository.
         ensure_log_dir()
         init_db(verbose=args.verbose)
         from jobs.execution_history_manager import ExecutionHistoryManager
-        
+
         # Create job history manager
         temp_logger = setup_logging("executioner", "show-run")
         job_history = ExecutionHistoryManager({}, None, None, temp_logger)
-        
+
         # Get run details
         run_details = job_history.get_run_details(args.show_run)
-        
+
         if not run_details:
             print(f"\nError: Run ID {args.show_run} not found.")
             print("Use --list-runs to see available runs.")
             sys.exit(1)
-        
+
         # Display run header
         run_info = run_details['run_info']
         print(f"\nRun Details for ID {args.show_run}:")
@@ -395,15 +395,15 @@ See README.md and docs/ directory in the project repository.
         print(f"End Time: {run_info['end_time']}")
         print(f"Duration: {run_info['duration']}")
         print(f"Total Jobs: {run_info['total_jobs']}")
-        
+
         jobs = run_details['jobs']
-        
+
         # Group jobs by status
         successful_jobs = [j for j in jobs if j['status'] == 'SUCCESS']
         failed_jobs = [j for j in jobs if j['status'] in ['FAILED', 'ERROR', 'TIMEOUT']]
         skipped_jobs = [j for j in jobs if j['status'] == 'SKIPPED']
         other_jobs = [j for j in jobs if j['status'] not in ['SUCCESS', 'FAILED', 'ERROR', 'TIMEOUT', 'SKIPPED']]
-        
+
         print(f"Successful Jobs: {len(successful_jobs)}")
         print(f"Failed Jobs: {len(failed_jobs)}")
         print(f"Skipped Jobs: {len(skipped_jobs)}")
@@ -414,7 +414,7 @@ See README.md and docs/ directory in the project repository.
             # Fallback for older runs without working_dir
             log_path = os.path.abspath(f"./logs/executioner.{run_info['application_name']}.run-{args.show_run}.log")
         print(f"Main log: {log_path}")
-        
+
         # Display job details in tabular format
         print(f"\nJob Status Details:")
         # Calculate table width: 30 + 3 + 8 + 3 + 19 + 3 + 19 + 3 + 8 = 96
@@ -422,7 +422,7 @@ See README.md and docs/ directory in the project repository.
         print("=" * table_width)
         print(f"{'Job ID':30} | {'Status':8} | {'Start Time':19} | {'End Time':19} | {'Duration':>8}")
         print("-" * table_width)
-        
+
         # Display all jobs in tabular format (ordered by execution time)
         for job in jobs:
             # Format duration
@@ -432,18 +432,18 @@ See README.md and docs/ directory in the project repository.
                 minutes, secs = divmod(seconds, 60)
                 hours, mins = divmod(minutes, 60)
                 duration_str = f"{hours:02d}:{mins:02d}:{secs:02d}"
-            
+
             # Format times
             start_time = job.get('last_run', 'N/A')[:19] if job.get('last_run') else 'N/A'
             end_time = job.get('end_time', 'N/A')[:19] if job.get('end_time') else 'N/A'
-            
+
             # Truncate job ID if too long
             job_id = job['id'][:29] if len(job['id']) > 29 else job['id']
-            
+
             print(f"{job_id:30} | {job['status']:8} | {start_time:19} | {end_time:19} | {duration_str:>8}")
-        
+
         print()  # Add newline after table
-        
+
         # Display failed job commands if any
         if failed_jobs:
             print(f"\nFailed Job Commands:")
@@ -451,7 +451,7 @@ See README.md and docs/ directory in the project repository.
             for job in failed_jobs:
                 if job.get('command'):
                     print(f"{job['id']}: {job['command']}")
-        
+
         # Display resume instructions if there are failed jobs
         if failed_jobs or skipped_jobs:
             print(f"\nResume Options:")
@@ -460,49 +460,49 @@ See README.md and docs/ directory in the project repository.
             print(f"  executioner.py -c <config> --resume-from {args.show_run}")
             print(f"\nTo retry only failed jobs:")
             print(f"  executioner.py -c <config> --resume-from {args.show_run} --resume-failed-only")
-            
+
             if failed_jobs:
                 failed_job_ids = ','.join([j['id'] for j in failed_jobs])
                 print(f"\nTo mark failed jobs as successful:")
                 print(f"  executioner.py --mark-success -r {args.show_run} -j {failed_job_ids}")
-        
+
         sys.exit(0)
-    
+
     # Validate run_id if provided
     if args.run_id is not None:
         if args.run_id <= 0:
             print("Error: Run ID must be a positive integer")
             sys.exit(1)
-    
+
     # Handle --mark-success flag
     if args.mark_success:
         if not args.run_id or not args.jobs:
             print("Error: --mark-success requires both -r RUN_ID and -j JOB_IDS")
             print("Example: executioner.py --mark-success -r 249 -j job1,job2")
             sys.exit(1)
-        
+
         # Initialize database
         Config.set_log_dir(Path.cwd() / "logs")
         ensure_log_dir()
         init_db(verbose=args.verbose)
         from jobs.execution_history_manager import ExecutionHistoryManager
-        
+
         # Parse job IDs
         job_ids = [job.strip() for job in args.jobs.split(',')]
-        
+
         # Create job history manager
         temp_logger = setup_logging("executioner", "mark-success")
         job_history = ExecutionHistoryManager({}, None, None, temp_logger)
-        
+
         # Get current status of these jobs
         print(f"\nChecking status for run {args.run_id}...")
         current_statuses = job_history.get_job_statuses_for_run(args.run_id, job_ids)
-        
+
         if not current_statuses:
             print(f"Error: No jobs found for run ID {args.run_id}")
             print("Use --list-runs to see available runs")
             sys.exit(1)
-        
+
         # Display current status
         print(f"\nCurrent status for run {args.run_id}:")
         for job_id, status in current_statuses.items():
@@ -510,7 +510,7 @@ See README.md and docs/ directory in the project repository.
                 print(f"  - {job_id}: {status}")
             else:
                 print(f"  - {job_id}: NOT FOUND in run")
-        
+
         # Check which jobs can be marked
         jobs_to_mark = []
         for job_id in job_ids:
@@ -522,24 +522,24 @@ See README.md and docs/ directory in the project repository.
                 jobs_to_mark.append(job_id)
             else:
                 print(f"\nWarning: Job '{job_id}' has status '{current_statuses[job_id]}' - can only mark FAILED/ERROR/TIMEOUT jobs")
-        
+
         if not jobs_to_mark:
             print("\nNo jobs to mark as successful.")
             sys.exit(0)
-        
+
         # Confirm action
         print(f"\nWill mark the following jobs as SUCCESS:")
         for job_id in jobs_to_mark:
             print(f"  - {job_id}")
-        
+
         response = input("\nAre you sure you want to mark these jobs as SUCCESS? [y/N]: ")
         if response.lower() != 'y':
             print("Operation cancelled.")
             sys.exit(0)
-        
+
         # Mark jobs as successful
         success_count = job_history.mark_jobs_successful(args.run_id, jobs_to_mark)
-        
+
         if success_count > 0:
             print(f"\n✓ Successfully marked {success_count} job(s) as SUCCESS")
             print(f"Note: Added comment 'Manually marked successful at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}'")
@@ -548,7 +548,7 @@ See README.md and docs/ directory in the project repository.
         else:
             print("\nError: Failed to update job status")
             sys.exit(1)
-        
+
         sys.exit(0)
 
     # Load config file and set log dir BEFORE init_db or JobExecutioner
@@ -567,7 +567,7 @@ See README.md and docs/ directory in the project repository.
     except Exception as e:
         print(f"Error reading configuration file '{args.config}': {e}")
         sys.exit(1)
-    
+
     # Handle working directory - must be done before setting log directory
     # working_dir is now mandatory - validate early
     if "working_dir" not in config_data:
@@ -576,9 +576,9 @@ See README.md and docs/ directory in the project repository.
         print("Example: \"working_dir\": \"/home/user/project\"")
         print("Use --sample-config to see a complete example configuration.")
         sys.exit(1)
-    
+
     working_dir = Path(config_data["working_dir"]).expanduser().resolve()
-    
+
     # Change to working directory
     original_cwd = Path.cwd()
     try:
@@ -588,10 +588,10 @@ See README.md and docs/ directory in the project repository.
     except Exception as e:
         print(f"Error: Cannot change to working directory '{working_dir}': {e}")
         sys.exit(1)
-    
+
     # Store working directory for database
     resolved_working_dir = str(working_dir)
-        
+
     if "log_dir" in config_data:
         # If log_dir is relative, it's now relative to working_dir
         Config.set_log_dir(config_data["log_dir"])
@@ -600,7 +600,7 @@ See README.md and docs/ directory in the project repository.
     ensure_log_dir()
 
     init_db(verbose=args.verbose)
-    executioner = JobExecutioner(args.config, resolved_working_dir, json_logs=args.json_logs)
+    executioner = JobExecutioner(args.config, resolved_working_dir)
 
     # Store original job-level envs for each job before merging
     original_job_envs = {job_id: dict(job.get("env_variables", {})) for job_id, job in executioner.jobs.items()}
@@ -650,7 +650,12 @@ See README.md and docs/ directory in the project repository.
         # If parallel is enabled and no explicit workers set, use the config default
         if args.workers is None:
             executioner.logger.info(f"Using {executioner.max_workers} workers from config")
-    
+
+        # Override workers if specified on command line
+        # If parallel is enabled and no explicit workers set, use the config default
+        if args.workers is None:
+            executioner.logger.info(f"Using {executioner.max_workers} workers from config")
+
     # Override workers if specified on command line
     if args.workers is not None and args.workers > 0:
         executioner.max_workers = args.workers
@@ -659,7 +664,7 @@ See README.md and docs/ directory in the project repository.
 
     if args.resume_failed_only and args.resume_from is None:
         parser.error("--resume-failed-only requires --resume-from")
-    
+
     if args.resume_from is not None:
         if args.resume_from <= 0:
             print("Error: Resume run ID must be a positive integer")
@@ -667,7 +672,7 @@ See README.md and docs/ directory in the project repository.
 
     # Parse skip jobs if provided
     skip_jobs = parse_skip_jobs(args.skip) if args.skip else []
-    
+
     try:
         code = executioner.run(
             continue_on_error=args.continue_on_error,
