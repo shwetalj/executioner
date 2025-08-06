@@ -200,7 +200,14 @@
                            @remove-connection="removeConnection"
                            @drop="handleDrop"
                            @select-job="selectJobById"
-                           @clear-canvas="clearCanvas" />
+                           @clear-canvas="clearCanvas"
+                           @delete-nodes="deleteCanvasNodes"
+                           @paste-nodes="pasteCanvasNodes"
+                           @duplicate-nodes="duplicateCanvasNodes"
+                           @rename-node="renameCanvasNode"
+                           @edit-node="editCanvasNode"
+                           @delete-connection="deleteConnection"
+                           @edit-connection="editConnection" />
           </div>
 
           <!-- JSON Editor Tab -->
@@ -329,6 +336,8 @@ export default {
       connections: [],
       selectedJob: null,
       selectedJobs: [], // Track multiple selected jobs
+      editingJob: null, // Job being edited in modal
+      showJobModal: false, // Show job edit modal
       isPointerSelecting: false,
       pointerSelection: {
         startX: 0,
@@ -727,8 +736,10 @@ export default {
     },
     addJobToCanvasFromContext() {
       if (this.contextMenu.targetJob && !this.isJobOnCanvas(this.contextMenu.targetJob.id)) {
+        // Create a deep copy to avoid reference issues
+        const jobCopy = JSON.parse(JSON.stringify(this.contextMenu.targetJob));
         this.canvasJobs.push({
-          ...this.contextMenu.targetJob,
+          ...jobCopy,
           x: 150,
           y: 150
         });
@@ -738,10 +749,17 @@ export default {
     },
     duplicateJobFromContext() {
       if (this.contextMenu.targetJob) {
-        const newJob = {
-          ...this.contextMenu.targetJob,
-          id: `${this.contextMenu.targetJob.id}_copy_${Date.now()}`
-        };
+        // Create a deep copy of the job to avoid reference issues
+        const timestamp = Date.now();
+        const newJob = JSON.parse(JSON.stringify(this.contextMenu.targetJob));
+        
+        // Generate a unique ID
+        newJob.id = `${this.contextMenu.targetJob.id}_copy_${timestamp}`;
+        
+        // Clear dependencies for the duplicated job
+        // Duplicated jobs should start without dependencies to avoid confusion
+        newJob.dependencies = [];
+        
         this.jobs.push(newJob);
         this.saveToHistory();
         this.hideContextMenu();
@@ -954,8 +972,10 @@ export default {
           const row = Math.floor(index / 3);
           const col = index % 3;
           
+          // Create a deep copy to avoid reference issues
+          const jobCopy = JSON.parse(JSON.stringify(job));
           this.canvasJobs.push({
-            ...job,
+            ...jobCopy,
             x: startX + (col * spacing),
             y: startY + (row * spacing)
           });
@@ -1067,22 +1087,15 @@ export default {
       this.appConfig = { ...this.appConfig, ...appConfig };
       this.jobs = jobs || [];
       
-      // Auto-layout jobs on canvas if they don't have positions
+      // Initially add jobs to canvas (positions will be set by WorkflowCanvas auto-arrange)
       this.canvasJobs = [];
-      const jobsPerRow = 4;
-      const horizontalSpacing = 180;
-      const verticalSpacing = 100;
-      const startX = 50;
-      const startY = 50;
       
-      this.jobs.forEach((job, index) => {
-        const row = Math.floor(index / jobsPerRow);
-        const col = index % jobsPerRow;
-        
+      this.jobs.forEach((job) => {
         this.canvasJobs.push({
           ...job,
-          x: job.x || (startX + col * horizontalSpacing),
-          y: job.y || (startY + row * verticalSpacing)
+          // Use saved positions if available, otherwise let auto-arrange handle it
+          x: job.x || 0,
+          y: job.y || 0
         });
       });
       
@@ -1090,6 +1103,7 @@ export default {
       this.updateConnectionsFromJobs();
       
       // Save initial state to history
+      // The WorkflowCanvas component will auto-arrange with layered layout
       this.$nextTick(() => {
         this.history = [];
         this.historyIndex = -1;
@@ -1230,13 +1244,19 @@ export default {
       }
       event.dataTransfer.effectAllowed = 'copy';
     },
-    handleDrop(event) {
+    handleDrop(event, gridSettings = {}) {
       if (this.draggedJob) {
         const canvas = event.target.closest('.drop-zone');
         if (canvas) {
           const rect = canvas.getBoundingClientRect();
-          const x = event.clientX - rect.left;
-          const y = event.clientY - rect.top;
+          let x = event.clientX - rect.left;
+          let y = event.clientY - rect.top;
+          
+          // Apply snap to grid if enabled
+          if (gridSettings.snapToGrid && gridSettings.gridSize) {
+            x = Math.round(x / gridSettings.gridSize) * gridSettings.gridSize;
+            y = Math.round(y / gridSettings.gridSize) * gridSettings.gridSize;
+          }
           
           // Handle multiple jobs drop
           if (this.draggedJob.isMultiple) {
@@ -1246,8 +1266,10 @@ export default {
                 const row = Math.floor(index / 3);
                 const col = index % 3;
                 
+                // Create a deep copy to avoid reference issues
+                const jobCopy = JSON.parse(JSON.stringify(job));
                 this.canvasJobs.push({
-                  ...job,
+                  ...jobCopy,
                   x: (x - 75) + (col * spacing),
                   y: (y - 30) + (row * spacing)
                 });
@@ -1259,8 +1281,10 @@ export default {
             // Single job drop
             const existingIndex = this.canvasJobs.findIndex(j => j.id === this.draggedJob.id);
             if (existingIndex === -1) {
+              // Create a deep copy to avoid reference issues
+              const jobCopy = JSON.parse(JSON.stringify(this.draggedJob));
               this.canvasJobs.push({
-                ...this.draggedJob,
+                ...jobCopy,
                 x: x - 75, // Center the node
                 y: y - 30
               });
@@ -1272,10 +1296,20 @@ export default {
     },
     updateJobPositions(positions) {
       positions.forEach(pos => {
-        const job = this.canvasJobs.find(j => j.id === pos.id);
-        if (job) {
-          job.x = pos.x;
-          job.y = pos.y;
+        // Update position in canvasJobs
+        const canvasJob = this.canvasJobs.find(j => j.id === pos.id);
+        if (canvasJob) {
+          // Update the position properties directly
+          canvasJob.x = pos.x;
+          canvasJob.y = pos.y;
+        }
+        
+        // Also update in main jobs array if it exists there
+        const mainJob = this.jobs.find(j => j.id === pos.id);
+        if (mainJob) {
+          // Store canvas position in the main job for persistence
+          mainJob.x = pos.x;
+          mainJob.y = pos.y;
         }
       });
       
@@ -1315,12 +1349,18 @@ export default {
     },
     updateConnectionsFromJobs() {
       this.connections = [];
-      if (!this.jobs) return;
+      if (!this.canvasJobs) return;
       
-      this.jobs.forEach(job => {
-        if (job.dependencies && job.dependencies.length > 0) {
+      // Only create connections for jobs that are on the canvas
+      this.canvasJobs.forEach(canvasJob => {
+        // Find the corresponding job in the main jobs array
+        const job = this.jobs.find(j => j.id === canvasJob.id);
+        if (job && job.dependencies && job.dependencies.length > 0) {
           job.dependencies.forEach(dep => {
-            this.connections.push({ from: dep, to: job.id });
+            // Only add connection if the dependency is also on the canvas
+            if (this.canvasJobs.find(cj => cj.id === dep)) {
+              this.connections.push({ from: dep, to: job.id });
+            }
           });
         }
       });
@@ -1328,6 +1368,184 @@ export default {
     clearCanvas() {
       this.canvasJobs = [];
       this.connections = [];
+    },
+    deleteCanvasNodes(nodeIds) {
+      // Remove nodes from canvas
+      this.canvasJobs = this.canvasJobs.filter(job => !nodeIds.includes(job.id));
+      
+      // Remove connections involving these nodes
+      this.connections = this.connections.filter(conn => 
+        !nodeIds.includes(conn.from) && !nodeIds.includes(conn.to)
+      );
+      
+      // Update dependencies in the main jobs array
+      nodeIds.forEach(nodeId => {
+        this.jobs.forEach(job => {
+          if (job.dependencies && job.dependencies.includes(nodeId)) {
+            job.dependencies = job.dependencies.filter(dep => dep !== nodeId);
+          }
+        });
+      });
+      
+      this.saveToHistory();
+    },
+    pasteCanvasNodes(pasteData) {
+      // Handle both old format (array) and new format (object with position)
+      let nodes, pastePosition;
+      if (Array.isArray(pasteData)) {
+        // Old format - just an array of nodes
+        nodes = pasteData;
+        pastePosition = null;
+      } else {
+        // New format - object with nodes and position
+        nodes = pasteData.nodes || [];
+        pastePosition = pasteData.position || null;
+      }
+      
+      // Generate new IDs and add nodes to canvas
+      const timestamp = Date.now();
+      const spacing = 30; // Spacing between pasted nodes
+      
+      nodes.forEach((node, index) => {
+        const newNode = JSON.parse(JSON.stringify(node));
+        newNode.id = `${node.id}_paste_${timestamp}_${index}`;
+        
+        // If we have a paste position (from context menu), use it
+        if (pastePosition) {
+          newNode.x = pastePosition.x + (index * spacing);
+          newNode.y = pastePosition.y + (index * spacing);
+        } else {
+          // Otherwise offset from original position
+          newNode.x = (node.x || 100) + spacing;
+          newNode.y = (node.y || 100) + spacing;
+        }
+        
+        newNode.dependencies = []; // Clear dependencies for pasted nodes
+        
+        // Add to main jobs list first
+        const mainJob = {
+          id: newNode.id,
+          description: newNode.description || '',
+          command: newNode.command || '',
+          dependencies: [],
+          timeout: newNode.timeout,
+          env_variables: newNode.env_variables || {},
+          pre_checks: newNode.pre_checks || [],
+          post_checks: newNode.post_checks || [],
+          x: newNode.x,
+          y: newNode.y
+        };
+        
+        if (!this.jobs.find(j => j.id === newNode.id)) {
+          this.jobs.push(mainJob);
+        }
+        
+        // Add to canvas
+        this.canvasJobs.push({...mainJob});
+      });
+      
+      this.saveToHistory();
+    },
+    duplicateCanvasNodes(nodes) {
+      const timestamp = Date.now();
+      const baseOffset = 30; // Base offset for duplicated nodes
+      
+      nodes.forEach((node, index) => {
+        // Create unique offset for each node to avoid overlap
+        const offset = baseOffset + (index * 10);
+        
+        // Generate unique ID
+        const newId = `${node.id}_copy_${timestamp}_${index}`;
+        
+        // Create a new job object for the main jobs list with deep copy of properties
+        const newMainJob = {
+          id: newId,
+          description: node.description || '',
+          command: node.command || '',
+          dependencies: [],
+          timeout: node.timeout,
+          env_variables: node.env_variables ? {...node.env_variables} : {},
+          pre_checks: node.pre_checks ? [...node.pre_checks] : [],
+          post_checks: node.post_checks ? [...node.post_checks] : [],
+          x: (node.x || 100) + offset,
+          y: (node.y || 100) + offset
+        };
+        
+        // Add to main jobs list
+        this.jobs.push(newMainJob);
+        
+        // Create canvas job - using spread to ensure it's a new object
+        const newCanvasJob = {
+          ...newMainJob
+        };
+        
+        // Add to canvas
+        this.canvasJobs.push(newCanvasJob);
+      });
+      
+      this.saveToHistory();
+    },
+    renameCanvasNode({ node, newName }) {
+      // Find and rename the node in both canvasJobs and jobs arrays
+      const canvasJob = this.canvasJobs.find(j => j.id === node.id);
+      const mainJob = this.jobs.find(j => j.id === node.id);
+      
+      if (canvasJob && mainJob) {
+        // Store old name for updating dependencies
+        const oldName = canvasJob.id;
+        
+        // Update the node ID
+        canvasJob.id = newName;
+        mainJob.id = newName;
+        
+        // Update all dependencies that reference the old name
+        this.jobs.forEach(job => {
+          if (job.dependencies && job.dependencies.includes(oldName)) {
+            const index = job.dependencies.indexOf(oldName);
+            job.dependencies[index] = newName;
+          }
+        });
+        
+        // Update connections
+        this.connections.forEach(conn => {
+          if (conn.from === oldName) conn.from = newName;
+          if (conn.to === oldName) conn.to = newName;
+        });
+        
+        this.saveToHistory();
+      }
+    },
+    editCanvasNode(node) {
+      // Find the job in the main jobs list
+      const job = this.jobs.find(j => j.id === node.id);
+      if (job) {
+        // Open the job edit modal or panel
+        this.editingJob = job;
+        this.showJobModal = true;
+      }
+    },
+    deleteConnection(connection) {
+      // Remove the connection
+      const index = this.connections.findIndex(c => 
+        c.from === connection.from && c.to === connection.to
+      );
+      
+      if (index !== -1) {
+        this.connections.splice(index, 1);
+        
+        // Update the dependency in the target job
+        const targetJob = this.jobs.find(j => j.id === connection.to);
+        if (targetJob && targetJob.dependencies) {
+          targetJob.dependencies = targetJob.dependencies.filter(dep => dep !== connection.from);
+        }
+        
+        this.saveToHistory();
+      }
+    },
+    editConnection(connection) {
+      // For now, just log it. In the future, could open a modal to edit connection properties
+      console.log('Edit connection:', connection);
+      // Future implementation: Open modal to edit connection properties like conditions, etc.
     },
     handleKeyDown(event) {
       // Save shortcut: Ctrl+S or Cmd+S
