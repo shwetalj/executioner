@@ -74,7 +74,9 @@
     <!-- Main Content -->
     <div class="flex flex-1" style="height: calc(100vh - 73px);">
       <!-- Left Sidebar - Jobs List -->
-      <aside class="w-64 border-r overflow-y-auto" :class="[theme.sidebarBg, theme.border]">
+      <aside class="relative border-r overflow-y-auto flex-shrink-0" 
+             :style="{ width: panelSizes.sidebar + 'px' }"
+             :class="[theme.sidebarBg, theme.border]">
         <!-- Application Config Section -->
         <div class="p-6 border-b" :class="theme.border">
           <button @click="showConfigModal = true" class="w-full text-left transition-colors" :class="[theme.text, 'hover:text-indigo-600']">
@@ -85,7 +87,11 @@
         </div>
         
         <!-- Jobs Section -->
-        <div class="p-6">
+        <div class="p-6 relative" 
+             @mousedown="startPointerSelection" 
+             @mousemove="updatePointerSelection" 
+             @mouseup="endPointerSelection"
+             @mouseleave="endPointerSelection">
           <div class="flex items-center justify-between mb-4">
             <h2 class="text-lg font-semibold" :class="theme.text">Jobs</h2>
             <button @click="addNewJob" class="px-3 py-1 text-sm rounded-lg transition-colors" :class="[theme.accent, theme.accentText, theme.accentHover]">
@@ -93,24 +99,79 @@
             </button>
           </div>
           
+          <!-- Multi-select hints -->
+          <div class="text-xs mb-2 p-2 rounded" :class="[theme.secondary, theme.textMuted]">
+            <div class="space-y-0.5">
+              <div><i class="fas fa-mouse-pointer mr-1"></i>Drag to lasso select</div>
+              <div><kbd class="px-1 py-0.5 text-xs rounded bg-gray-200 dark:bg-gray-700">Ctrl</kbd>+Click: Toggle selection</div>
+              <div><kbd class="px-1 py-0.5 text-xs rounded bg-gray-200 dark:bg-gray-700">Shift</kbd>+Click: Select range</div>
+              <div><kbd class="px-1 py-0.5 text-xs rounded bg-gray-200 dark:bg-gray-700">F2</kbd>: Rename selected</div>
+            </div>
+          </div>
+          
           <!-- Jobs List -->
-          <div class="space-y-2">
+          <div class="space-y-1">
             <div v-for="job in jobs" :key="job.id"
-                 class="p-2 rounded-lg border cursor-move transition-all"
-                 :class="[theme.surface, theme.border, theme.nodeHover]"
+                 :ref="`job-${job.id}`"
+                 class="group p-2 rounded border cursor-pointer select-none transition-all relative job-item"
+                 :class="[
+                   theme.surface, 
+                   theme.border, 
+                   isJobSelected(job.id) ? theme.nodeSelected : theme.nodeHover,
+                   'hover:shadow-sm'
+                 ]"
+                 :title="job.description || job.id"
+                 :data-job-id="job.id"
                  draggable="true"
                  @dragstart="startDrag($event, job)"
-                 @click="selectJob(job)">
+                 @click="handleJobClick(job, $event)"
+                 @dblclick="selectJobAndEdit(job)"
+                 @contextmenu.prevent="showContextMenu($event, job)">
               <div class="flex items-center justify-between">
-                <h3 class="font-medium" :class="theme.text">{{ job.id }}</h3>
-                <button @click.stop="removeJob(job.id)" class="text-red-500 hover:text-red-700">
-                  <i class="fas fa-trash"></i>
+                <div class="flex items-center space-x-2 flex-1">
+                  <i v-if="isJobSelected(job.id)" class="fas fa-check-circle text-green-500 text-sm"></i>
+                  <div v-if="renamingJobId === job.id" class="flex-1">
+                    <input type="text" 
+                           v-model="renamingJobNewName"
+                           @keyup.enter="confirmRename"
+                           @keyup.esc="cancelRename"
+                           @blur="confirmRename"
+                           @click.stop
+                           class="w-full px-1 py-0 text-sm border rounded"
+                           :class="[theme.border, theme.text, theme.surface]"
+                           ref="renameInput"
+                           autofocus />
+                  </div>
+                  <h3 v-else class="font-medium text-sm" :class="theme.text">{{ job.id }}</h3>
+                  <i v-if="job.description && renamingJobId !== job.id" class="fas fa-info-circle text-xs" :class="theme.textMuted"></i>
+                </div>
+                <button @click.stop="removeJob(job.id)" 
+                        class="opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-700 transition-opacity">
+                  <i class="fas fa-trash text-sm"></i>
                 </button>
               </div>
             </div>
           </div>
+          
+          <!-- Pointer Selection Overlay -->
+          <div v-if="isPointerSelecting" 
+               class="absolute border-2 border-blue-500 bg-blue-500 bg-opacity-10 pointer-events-none"
+               :style="{
+                 left: Math.min(pointerSelection.startX, pointerSelection.endX) + 'px',
+                 top: Math.min(pointerSelection.startY, pointerSelection.endY) + 'px',
+                 width: Math.abs(pointerSelection.endX - pointerSelection.startX) + 'px',
+                 height: Math.abs(pointerSelection.endY - pointerSelection.startY) + 'px'
+               }">
+          </div>
         </div>
       </aside>
+      
+      <!-- Sidebar Resize Handle -->
+      <div class="relative w-1 cursor-col-resize hover:bg-blue-500 transition-colors group"
+           :class="isResizing.sidebar ? 'bg-blue-500' : 'bg-transparent'"
+           @mousedown="startResizeSidebar">
+        <div class="absolute inset-y-0 -left-1 -right-1 group-hover:bg-blue-500 group-hover:opacity-20"></div>
+      </div>
 
       <!-- Main Content Area -->
       <main class="flex-1 flex flex-col h-full">
@@ -149,8 +210,19 @@
         </div>
       </main>
 
+      <!-- Job Editor Resize Handle -->
+      <div v-if="selectedJob && activeTab === 'visual'"
+           class="relative w-1 cursor-col-resize hover:bg-blue-500 transition-colors group"
+           :class="isResizing.jobEditor ? 'bg-blue-500' : 'bg-transparent'"
+           @mousedown="startResizeJobEditor">
+        <div class="absolute inset-y-0 -left-1 -right-1 group-hover:bg-blue-500 group-hover:opacity-20"></div>
+      </div>
+      
       <!-- Right Sidebar - Job Editor -->
-      <aside v-if="selectedJob && activeTab === 'visual'" class="w-96 border-l overflow-y-auto" :class="[theme.surface, theme.border]">
+      <aside v-if="selectedJob && activeTab === 'visual'" 
+             class="border-l overflow-y-auto flex-shrink-0" 
+             :style="{ width: panelSizes.jobEditor + 'px' }"
+             :class="[theme.surface, theme.border]">
         <JobEditor :job="selectedJob" :theme="theme" @update="updateJob" @close="selectedJob = null" />
       </aside>
     </div>
@@ -169,6 +241,69 @@
         </div>
       </div>
     </div>
+  </div>
+  
+  <!-- Context Menu -->
+  <div v-if="contextMenu.visible" 
+       class="fixed z-50 py-1 rounded-lg shadow-lg min-w-[150px]"
+       :class="[theme.surface, theme.border]"
+       :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
+       @click.stop>
+    <button v-if="contextMenu.targetJob" 
+            @click="editJobFromContext"
+            class="w-full text-left px-4 py-2 text-sm transition-colors"
+            :class="[theme.text, theme.surfaceHover]">
+      <i class="fas fa-edit mr-2 w-4"></i>Edit
+    </button>
+    <button v-if="contextMenu.targetJob" 
+            @click="renameJobFromContext"
+            class="w-full text-left px-4 py-2 text-sm transition-colors"
+            :class="[theme.text, theme.surfaceHover]">
+      <i class="fas fa-i-cursor mr-2 w-4"></i>Rename
+    </button>
+    <button v-if="contextMenu.targetJob && !isJobOnCanvas(contextMenu.targetJob.id)" 
+            @click="addJobToCanvasFromContext"
+            class="w-full text-left px-4 py-2 text-sm transition-colors"
+            :class="[theme.text, theme.surfaceHover]">
+      <i class="fas fa-plus-circle mr-2 w-4"></i>Add to Canvas
+    </button>
+    <button v-if="contextMenu.targetJob" 
+            @click="duplicateJobFromContext"
+            class="w-full text-left px-4 py-2 text-sm transition-colors"
+            :class="[theme.text, theme.surfaceHover]">
+      <i class="fas fa-copy mr-2 w-4"></i>Duplicate
+    </button>
+    <div class="border-t my-1" :class="theme.border"></div>
+    <button @click="selectAllJobsFromContext"
+            class="w-full text-left px-4 py-2 text-sm transition-colors"
+            :class="[theme.text, theme.surfaceHover]">
+      <i class="fas fa-check-square mr-2 w-4"></i>Select All
+    </button>
+    <button v-if="selectedJobs.length > 0"
+            @click="clearSelectionFromContext"
+            class="w-full text-left px-4 py-2 text-sm transition-colors"
+            :class="[theme.text, theme.surfaceHover]">
+      <i class="fas fa-times-circle mr-2 w-4"></i>Clear Selection
+    </button>
+    <div v-if="selectedJobs.length > 0" class="border-t my-1" :class="theme.border"></div>
+    <button v-if="selectedJobs.length > 1"
+            @click="addSelectedJobsToCanvasFromContext"
+            class="w-full text-left px-4 py-2 text-sm transition-colors"
+            :class="[theme.text, theme.surfaceHover]">
+      <i class="fas fa-plus-square mr-2 w-4"></i>Add {{ selectedJobs.length }} Selected to Canvas
+    </button>
+    <button v-if="selectedJobs.length > 0"
+            @click="deleteSelectedJobsFromContext"
+            class="w-full text-left px-4 py-2 text-sm text-red-500 transition-colors"
+            :class="theme.surfaceHover">
+      <i class="fas fa-trash mr-2 w-4"></i>Delete {{ selectedJobs.length }} Selected
+    </button>
+    <button v-if="contextMenu.targetJob && selectedJobs.length === 0" 
+            @click="deleteJobFromContext"
+            class="w-full text-left px-4 py-2 text-sm text-red-500 transition-colors"
+            :class="theme.surfaceHover">
+      <i class="fas fa-trash mr-2 w-4"></i>Delete
+    </button>
   </div>
 </template>
 
@@ -193,6 +328,32 @@ export default {
       canvasJobs: [],
       connections: [],
       selectedJob: null,
+      selectedJobs: [], // Track multiple selected jobs
+      isPointerSelecting: false,
+      pointerSelection: {
+        startX: 0,
+        startY: 0,
+        endX: 0,
+        endY: 0
+      },
+      contextMenu: {
+        visible: false,
+        x: 0,
+        y: 0,
+        targetJob: null
+      },
+      // Panel resizing
+      panelSizes: {
+        sidebar: 256, // 16rem = 256px (w-64)
+        jobEditor: 384 // 24rem = 384px (w-96)
+      },
+      isResizing: {
+        sidebar: false,
+        jobEditor: false
+      },
+      // Rename functionality
+      renamingJobId: null,
+      renamingJobNewName: '',
       showConfigModal: false,
       currentFileName: null,
       currentFilePath: null,
@@ -408,6 +569,405 @@ export default {
     }
   },
   methods: {
+    // Multi-select methods
+    isJobSelected(jobId) {
+      return this.selectedJobs.includes(jobId);
+    },
+    handleJobClick(job, event) {
+      // Handle keyboard modifiers for multi-select
+      if (event.shiftKey && this.selectedJobs.length > 0) {
+        // Shift+Click: Select range
+        event.preventDefault();
+        this.selectJobRange(job);
+      } else if (event.ctrlKey || event.metaKey) {
+        // Ctrl/Cmd+Click: Toggle individual selection
+        event.preventDefault();
+        const index = this.selectedJobs.indexOf(job.id);
+        if (index > -1) {
+          this.selectedJobs.splice(index, 1);
+        } else {
+          this.selectedJobs.push(job.id);
+        }
+      } else {
+        // Regular click: Select single job and show in editor
+        this.selectedJobs = [];
+        this.selectJob(job);
+      }
+    },
+    selectJobAndEdit(job) {
+      // Double-click: Select and edit job
+      this.selectedJobs = [];
+      this.selectJob(job);
+    },
+    selectJobRange(toJob) {
+      const lastSelectedId = this.selectedJobs[this.selectedJobs.length - 1];
+      const fromIndex = this.jobs.findIndex(j => j.id === lastSelectedId);
+      const toIndex = this.jobs.findIndex(j => j.id === toJob.id);
+      
+      if (fromIndex !== -1 && toIndex !== -1) {
+        const start = Math.min(fromIndex, toIndex);
+        const end = Math.max(fromIndex, toIndex);
+        
+        for (let i = start; i <= end; i++) {
+          if (!this.selectedJobs.includes(this.jobs[i].id)) {
+            this.selectedJobs.push(this.jobs[i].id);
+          }
+        }
+      }
+    },
+    clearSelection() {
+      this.selectedJobs = [];
+    },
+    selectAllJobs() {
+      this.selectedJobs = this.jobs.map(job => job.id);
+    },
+    // Pointer Selection Methods
+    startPointerSelection(event) {
+      // Only start lasso if dragging from empty space (not on a job)
+      if (event.target.closest('.job-item')) return;
+      
+      const container = event.currentTarget;
+      const rect = container.getBoundingClientRect();
+      
+      this.isPointerSelecting = true;
+      this.pointerSelection.startX = event.clientX - rect.left;
+      this.pointerSelection.startY = event.clientY - rect.top;
+      this.pointerSelection.endX = this.pointerSelection.startX;
+      this.pointerSelection.endY = this.pointerSelection.startY;
+      this.pointerSelection.ctrlKey = event.ctrlKey || event.metaKey;
+      
+      // Clear previous selection unless Ctrl/Cmd is held
+      if (!event.ctrlKey && !event.metaKey) {
+        this.selectedJobs = [];
+      }
+    },
+    updatePointerSelection(event) {
+      if (!this.isPointerSelecting) return;
+      
+      const container = event.currentTarget;
+      const rect = container.getBoundingClientRect();
+      
+      this.pointerSelection.endX = event.clientX - rect.left;
+      this.pointerSelection.endY = event.clientY - rect.top;
+      
+      // Check which jobs are within the selection area
+      this.updateSelectedJobsInArea();
+    },
+    endPointerSelection() {
+      this.isPointerSelecting = false;
+    },
+    updateSelectedJobsInArea() {
+      const selectionRect = {
+        left: Math.min(this.pointerSelection.startX, this.pointerSelection.endX),
+        top: Math.min(this.pointerSelection.startY, this.pointerSelection.endY),
+        right: Math.max(this.pointerSelection.startX, this.pointerSelection.endX),
+        bottom: Math.max(this.pointerSelection.startY, this.pointerSelection.endY)
+      };
+      
+      // Get the initial selection state (before this lasso)
+      const initialSelection = [...this.selectedJobs];
+      const lassoSelection = [];
+      
+      this.jobs.forEach(job => {
+        const jobEl = this.$refs[`job-${job.id}`]?.[0];
+        if (jobEl) {
+          const jobRect = jobEl.getBoundingClientRect();
+          const containerRect = jobEl.closest('.p-6').getBoundingClientRect();
+          
+          const jobRelativeRect = {
+            left: jobRect.left - containerRect.left,
+            top: jobRect.top - containerRect.top,
+            right: jobRect.right - containerRect.left,
+            bottom: jobRect.bottom - containerRect.top
+          };
+          
+          // Check if job is within selection
+          if (jobRelativeRect.left < selectionRect.right &&
+              jobRelativeRect.right > selectionRect.left &&
+              jobRelativeRect.top < selectionRect.bottom &&
+              jobRelativeRect.bottom > selectionRect.top) {
+            lassoSelection.push(job.id);
+          }
+        }
+      });
+      
+      // Combine with existing selection if Ctrl/Cmd was held
+      // Otherwise replace with new selection
+      if (this.pointerSelection.ctrlKey) {
+        // Add lasso selection to existing, avoiding duplicates
+        this.selectedJobs = [...new Set([...initialSelection, ...lassoSelection])];
+      } else {
+        this.selectedJobs = lassoSelection;
+      }
+    },
+    // Context Menu Methods
+    showContextMenu(event, job) {
+      this.contextMenu.targetJob = job;
+      this.contextMenu.x = event.clientX;
+      this.contextMenu.y = event.clientY;
+      this.contextMenu.visible = true;
+      
+      // Add click listener to hide menu
+      setTimeout(() => {
+        document.addEventListener('click', this.hideContextMenu, { once: true });
+      }, 0);
+    },
+    hideContextMenu() {
+      this.contextMenu.visible = false;
+      this.contextMenu.targetJob = null;
+    },
+    isJobOnCanvas(jobId) {
+      return this.canvasJobs.some(j => j.id === jobId);
+    },
+    editJobFromContext() {
+      if (this.contextMenu.targetJob) {
+        this.selectJob(this.contextMenu.targetJob);
+        this.hideContextMenu();
+      }
+    },
+    addJobToCanvasFromContext() {
+      if (this.contextMenu.targetJob && !this.isJobOnCanvas(this.contextMenu.targetJob.id)) {
+        this.canvasJobs.push({
+          ...this.contextMenu.targetJob,
+          x: 150,
+          y: 150
+        });
+        this.saveToHistory();
+        this.hideContextMenu();
+      }
+    },
+    duplicateJobFromContext() {
+      if (this.contextMenu.targetJob) {
+        const newJob = {
+          ...this.contextMenu.targetJob,
+          id: `${this.contextMenu.targetJob.id}_copy_${Date.now()}`
+        };
+        this.jobs.push(newJob);
+        this.saveToHistory();
+        this.hideContextMenu();
+      }
+    },
+    selectAllJobsFromContext() {
+      this.selectAllJobs();
+      this.hideContextMenu();
+    },
+    clearSelectionFromContext() {
+      this.clearSelection();
+      this.hideContextMenu();
+    },
+    addSelectedJobsToCanvasFromContext() {
+      this.addSelectedJobsToCanvas();
+      this.hideContextMenu();
+    },
+    deleteSelectedJobsFromContext() {
+      this.deleteSelectedJobs();
+      this.hideContextMenu();
+    },
+    deleteJobFromContext() {
+      if (this.contextMenu.targetJob) {
+        this.removeJob(this.contextMenu.targetJob.id);
+        this.hideContextMenu();
+      }
+    },
+    renameJobFromContext() {
+      if (this.contextMenu.targetJob) {
+        this.startRename(this.contextMenu.targetJob);
+        this.hideContextMenu();
+      }
+    },
+    startRename(job) {
+      this.renamingJobId = job.id;
+      this.renamingJobNewName = job.id;
+      
+      // Focus the input after Vue updates the DOM
+      this.$nextTick(() => {
+        const input = this.$refs.renameInput;
+        if (input) {
+          input.focus();
+          input.select();
+        }
+      });
+    },
+    confirmRename() {
+      if (!this.renamingJobId || !this.renamingJobNewName) {
+        this.cancelRename();
+        return;
+      }
+      
+      const newName = this.renamingJobNewName.trim();
+      
+      // Validate new name
+      if (!newName) {
+        alert('Job name cannot be empty');
+        this.cancelRename();
+        return;
+      }
+      
+      // Check for duplicate names
+      const isDuplicate = this.jobs.some(j => j.id === newName && j.id !== this.renamingJobId);
+      if (isDuplicate) {
+        alert('A job with this name already exists');
+        return;
+      }
+      
+      // Find and update the job
+      const job = this.jobs.find(j => j.id === this.renamingJobId);
+      if (job) {
+        const oldId = job.id;
+        job.id = newName;
+        
+        // Update the job in canvasJobs if it exists there
+        const canvasJob = this.canvasJobs.find(j => j.id === oldId);
+        if (canvasJob) {
+          canvasJob.id = newName;
+        }
+        
+        // Update connections that reference this job
+        this.connections.forEach(conn => {
+          if (conn.from === oldId) conn.from = newName;
+          if (conn.to === oldId) conn.to = newName;
+        });
+        
+        // Update dependencies in all jobs
+        this.jobs.forEach(j => {
+          if (j.dependencies && Array.isArray(j.dependencies)) {
+            const depIndex = j.dependencies.indexOf(oldId);
+            if (depIndex > -1) {
+              j.dependencies[depIndex] = newName;
+            }
+          }
+        });
+        
+        // Update selected jobs
+        const selectedIndex = this.selectedJobs.indexOf(oldId);
+        if (selectedIndex > -1) {
+          this.selectedJobs[selectedIndex] = newName;
+        }
+        
+        // Update selectedJob if it's the renamed job
+        if (this.selectedJob && this.selectedJob.id === oldId) {
+          this.selectedJob.id = newName;
+        }
+        
+        this.saveToHistory();
+      }
+      
+      this.cancelRename();
+    },
+    cancelRename() {
+      this.renamingJobId = null;
+      this.renamingJobNewName = '';
+    },
+    // Panel Resizing Methods
+    startResizeSidebar(event) {
+      this.isResizing.sidebar = true;
+      document.addEventListener('mousemove', this.resizeSidebar);
+      document.addEventListener('mouseup', this.stopResizeSidebar);
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+      event.preventDefault();
+    },
+    resizeSidebar(event) {
+      if (!this.isResizing.sidebar) return;
+      
+      const newWidth = event.clientX;
+      const minWidth = 200;
+      const maxWidth = 500;
+      
+      this.panelSizes.sidebar = Math.min(Math.max(newWidth, minWidth), maxWidth);
+    },
+    stopResizeSidebar() {
+      this.isResizing.sidebar = false;
+      document.removeEventListener('mousemove', this.resizeSidebar);
+      document.removeEventListener('mouseup', this.stopResizeSidebar);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      
+      // Save to localStorage
+      this.savePanelSizes();
+    },
+    startResizeJobEditor(event) {
+      this.isResizing.jobEditor = true;
+      document.addEventListener('mousemove', this.resizeJobEditor);
+      document.addEventListener('mouseup', this.stopResizeJobEditor);
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+      event.preventDefault();
+    },
+    resizeJobEditor(event) {
+      if (!this.isResizing.jobEditor) return;
+      
+      const windowWidth = window.innerWidth;
+      const newWidth = windowWidth - event.clientX;
+      const minWidth = 300;
+      const maxWidth = 600;
+      
+      this.panelSizes.jobEditor = Math.min(Math.max(newWidth, minWidth), maxWidth);
+    },
+    stopResizeJobEditor() {
+      this.isResizing.jobEditor = false;
+      document.removeEventListener('mousemove', this.resizeJobEditor);
+      document.removeEventListener('mouseup', this.stopResizeJobEditor);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      
+      // Save to localStorage
+      this.savePanelSizes();
+    },
+    savePanelSizes() {
+      localStorage.setItem('executioner-panel-sizes', JSON.stringify(this.panelSizes));
+    },
+    loadPanelSizes() {
+      const saved = localStorage.getItem('executioner-panel-sizes');
+      if (saved) {
+        try {
+          const sizes = JSON.parse(saved);
+          this.panelSizes = { ...this.panelSizes, ...sizes };
+        } catch (e) {
+          console.error('Failed to load panel sizes:', e);
+        }
+      }
+    },
+    deleteSelectedJobs() {
+      if (this.selectedJobs.length === 0) return;
+      
+      const count = this.selectedJobs.length;
+      if (confirm(`Are you sure you want to delete ${count} job(s)?`)) {
+        this.selectedJobs.forEach(jobId => {
+          this.removeJob(jobId);
+        });
+        this.selectedJobs = [];
+      }
+    },
+    addSelectedJobsToCanvas() {
+      if (this.selectedJobs.length === 0) return;
+      
+      // Calculate starting position for the group
+      const startX = 150;
+      const startY = 150;
+      const spacing = 150;
+      
+      this.selectedJobs.forEach((jobId, index) => {
+        const job = this.jobs.find(j => j.id === jobId);
+        if (job && !this.canvasJobs.find(cj => cj.id === job.id)) {
+          // Add job to canvas with staggered positioning
+          const row = Math.floor(index / 3);
+          const col = index % 3;
+          
+          this.canvasJobs.push({
+            ...job,
+            x: startX + (col * spacing),
+            y: startY + (row * spacing)
+          });
+        }
+      });
+      
+      // Clear selection after adding
+      this.selectedJobs = [];
+      
+      // Save to history
+      this.saveToHistory();
+    },
     newConfig() {
       if (confirm('Are you sure you want to create a new configuration? This will clear the current configuration.')) {
         this.jobs = [];
@@ -659,7 +1219,15 @@ export default {
       }
     },
     startDrag(event, job) {
-      this.draggedJob = job;
+      // If dragging a selected job, drag all selected jobs
+      if (this.selectedJobs.includes(job.id) && this.selectedJobs.length > 1) {
+        this.draggedJob = {
+          isMultiple: true,
+          jobs: this.selectedJobs.map(id => this.jobs.find(j => j.id === id)).filter(j => j)
+        };
+      } else {
+        this.draggedJob = job;
+      }
       event.dataTransfer.effectAllowed = 'copy';
     },
     handleDrop(event) {
@@ -670,14 +1238,33 @@ export default {
           const x = event.clientX - rect.left;
           const y = event.clientY - rect.top;
           
-          // Check if job already exists on canvas
-          const existingIndex = this.canvasJobs.findIndex(j => j.id === this.draggedJob.id);
-          if (existingIndex === -1) {
-            this.canvasJobs.push({
-              ...this.draggedJob,
-              x: x - 75, // Center the node
-              y: y - 30
+          // Handle multiple jobs drop
+          if (this.draggedJob.isMultiple) {
+            const spacing = 150;
+            this.draggedJob.jobs.forEach((job, index) => {
+              if (!this.canvasJobs.find(cj => cj.id === job.id)) {
+                const row = Math.floor(index / 3);
+                const col = index % 3;
+                
+                this.canvasJobs.push({
+                  ...job,
+                  x: (x - 75) + (col * spacing),
+                  y: (y - 30) + (row * spacing)
+                });
+              }
             });
+            // Clear selection after dropping
+            this.selectedJobs = [];
+          } else {
+            // Single job drop
+            const existingIndex = this.canvasJobs.findIndex(j => j.id === this.draggedJob.id);
+            if (existingIndex === -1) {
+              this.canvasJobs.push({
+                ...this.draggedJob,
+                x: x - 75, // Center the node
+                y: y - 30
+              });
+            }
           }
         }
         this.draggedJob = null;
@@ -762,6 +1349,11 @@ export default {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'y') {
         event.preventDefault();
         this.redo();
+      }
+      // Rename shortcut: F2
+      if (event.key === 'F2' && this.selectedJob && !this.renamingJobId) {
+        event.preventDefault();
+        this.startRename(this.selectedJob);
       }
     },
     debouncedSaveToHistory() {
@@ -864,6 +1456,9 @@ export default {
     if (savedTheme && this.themes[savedTheme]) {
       this.currentTheme = savedTheme;
     }
+    
+    // Load saved panel sizes
+    this.loadPanelSizes();
     document.addEventListener('keydown', this.handleKeyDown);
     // Save initial empty state
     this.$nextTick(() => {
@@ -876,3 +1471,35 @@ export default {
   }
 };
 </script>
+
+<style scoped>
+
+/* Context menu animation */
+.context-menu-enter-active,
+.context-menu-leave-active {
+  transition: opacity 0.1s ease;
+}
+
+.context-menu-enter-from,
+.context-menu-leave-to {
+  opacity: 0;
+}
+
+/* Resize handle styling */
+.cursor-col-resize {
+  cursor: col-resize !important;
+}
+
+/* Prevent text selection during resize */
+.select-none {
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+}
+
+/* Smooth panel transitions */
+aside[style*="width"] {
+  transition: width 0.1s ease-out;
+}
+</style>
