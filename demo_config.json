@@ -1,0 +1,24 @@
+{
+    "application_name": "demo_pipeline",
+    "working_dir": "/home/user/executioner",
+    "email_address": "demo@example.com",
+    "jobs": [
+        {
+            "id": "job1",
+            "description": "First demo job - check Python version",
+            "command": "python3 --version"
+        },
+        {
+            "id": "job2",
+            "description": "Second demo job - list files",
+            "command": "ls -la",
+            "dependencies": ["job1"]
+        },
+        {
+            "id": "job3",
+            "description": "Third demo job - show current directory",
+            "command": "pwd",
+            "dependencies": ["job2"]
+        }
+    ]
+}
