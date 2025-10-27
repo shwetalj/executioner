@@ -6,6 +6,7 @@
     
     <!-- Canvas -->
     <div class="drop-zone relative h-full overflow-hidden"
+         tabindex="0"
          @drop.prevent="handleDrop"
          @dragover.prevent="handleDragOver"
          @dragleave="handleDragLeave"
@@ -15,6 +16,7 @@
          @mouseup="handleCanvasMouseUp"
          @mouseleave="handleCanvasMouseLeave"
          @wheel="handleCanvasWheel"
+         @click="focusCanvas"
          :style="{ cursor: canvasCursor }">
       
       <!-- Canvas content wrapper with transform -->
@@ -132,11 +134,13 @@
     </div> <!-- End of drop-zone -->
     
     <!-- Selection Info -->
-    <div v-if="selectedNodes.length > 1" class="absolute top-4 left-4 px-3 py-2 rounded-lg shadow-lg" 
+    <div v-if="totalSelectedCount > 0" class="absolute top-4 left-4 px-3 py-2 rounded-lg shadow-lg" 
          :class="[theme ? theme.nodeBg : 'bg-white', theme ? theme.border : 'border-gray-200']">
       <span class="text-sm font-medium" :class="theme ? theme.text : 'text-gray-900'">
-        <i class="fas fa-check-square mr-1"></i>{{ selectedNodes.length }} nodes selected
+        <i class="fas fa-check-square mr-1"></i>{{ totalSelectedCount }} node{{ totalSelectedCount > 1 ? 's' : '' }} selected
       </span>
+      <span v-if="selectedNode && selectedNodes.length === 0" class="text-xs ml-2 opacity-75">(single)</span>
+      <span v-if="selectedNodes.length > 0" class="text-xs ml-2 opacity-75">(multi)</span>
     </div>
     
     <!-- Pan Mode Indicator -->
@@ -471,6 +475,11 @@ export default {
     document.addEventListener('keydown', this.handleKeyDown);
     document.addEventListener('keyup', this.handleKeyUp);
     
+    // Focus canvas on mount for keyboard shortcuts
+    this.$nextTick(() => {
+      this.focusCanvas();
+    });
+    
     // Load grid preferences
     const savedShowGrid = localStorage.getItem('canvas-showGrid');
     if (savedShowGrid !== null) {
@@ -499,6 +508,14 @@ export default {
     }
   },
   methods: {
+    focusCanvas() {
+      // Ensure canvas has focus for keyboard shortcuts
+      const canvas = this.$el.querySelector('.drop-zone');
+      if (canvas) {
+        canvas.focus();
+        console.log('Canvas focused for keyboard shortcuts');
+      }
+    },
     handleDrop(event) {
       this.isDragOver = false;
       // Pass grid settings with the event
@@ -515,6 +532,8 @@ export default {
       this.isDragOver = false;
     },
     selectNode(nodeId) {
+      // Clear multi-selection and select single node
+      this.selectedNodes = [];
       this.selectedNode = nodeId;
       this.$emit('select-job', nodeId);
     },
@@ -535,14 +554,23 @@ export default {
         // Ctrl/Cmd+Click: Toggle individual selection
         const index = this.selectedNodes.indexOf(job.id);
         if (index > -1) {
+          // Remove from selection
           this.selectedNodes.splice(index, 1);
+          // If this was the selectedNode, clear it
+          if (this.selectedNode === job.id) {
+            this.selectedNode = null;
+          }
         } else {
+          // Add to selection
           this.selectedNodes.push(job.id);
+          // Clear single selection when building multi-selection
+          this.selectedNode = null;
         }
       } else {
         // Regular click: Select single node
         this.selectedNodes = [];
-        this.selectNode(job.id);
+        this.selectedNode = job.id;
+        this.$emit('select-job', job.id);
       }
     },
     selectNodeRange(toNode) {
@@ -558,6 +586,11 @@ export default {
     },
     // Keyboard shortcuts
     handleKeyDown(event) {
+      // Log all Ctrl/Cmd key combinations for debugging
+      if (event.ctrlKey || event.metaKey) {
+        console.log(`Key pressed: ${event.ctrlKey ? 'Ctrl' : 'Cmd'}+${event.key}`);
+      }
+      
       // Space key for panning
       if (event.code === 'Space' && !this.spacePressed) {
         this.spacePressed = true;
@@ -566,9 +599,28 @@ export default {
       }
       
       // Only handle shortcuts when canvas or its children have focus
-      if (!this.$el || !this.$el.contains(document.activeElement)) {
-        // But allow shortcuts if nothing else is focused (body has focus)
-        if (document.activeElement !== document.body) return;
+      // Also allow if the WorkflowCanvas component itself has focus
+      const canvasElement = this.$el;
+      const activeElement = document.activeElement;
+      
+      if (!canvasElement) {
+        console.log('Canvas element not found');
+        return;
+      }
+      
+      // Check if focus is within canvas, or body, or the canvas itself
+      const focusInCanvas = canvasElement.contains(activeElement);
+      const focusOnBody = activeElement === document.body;
+      const focusOnCanvas = activeElement === canvasElement;
+      
+      if (!focusInCanvas && !focusOnBody && !focusOnCanvas) {
+        console.log('Focus not in canvas - shortcuts disabled', {
+          focusInCanvas,
+          focusOnBody,
+          focusOnCanvas,
+          activeElement: activeElement.tagName
+        });
+        return;
       }
       
       // Don't handle shortcuts when typing in input fields
@@ -645,8 +697,16 @@ export default {
     },
     deleteSelectedNodes() {
       if (this.selectedNodes.length > 0 || this.selectedNode) {
-        const nodesToDelete = this.selectedNodes.length > 0 ? 
-          this.selectedNodes : [this.selectedNode];
+        // Combine both selection types
+        let nodesToDelete = [...this.selectedNodes];
+        if (this.selectedNode && !nodesToDelete.includes(this.selectedNode)) {
+          nodesToDelete.push(this.selectedNode);
+        }
+        
+        // Remove any nulls or undefineds
+        nodesToDelete = nodesToDelete.filter(id => id);
+        
+        console.log('Deleting nodes:', nodesToDelete);
         
         // Emit event to parent to handle deletion
         this.$emit('delete-nodes', nodesToDelete);
@@ -658,52 +718,154 @@ export default {
       this.selectedNode = null;
     },
     copySelectedNodes() {
+      console.log('copySelectedNodes called', {
+        selectedNodes: this.selectedNodes,
+        selectedNode: this.selectedNode
+      });
+      
       if (this.selectedNodes.length > 0 || this.selectedNode) {
-        const nodesToCopy = this.selectedNodes.length > 0 ? 
-          this.selectedNodes : [this.selectedNode];
+        // Combine both selection types
+        let nodesToCopy = [...this.selectedNodes];
+        if (this.selectedNode && !nodesToCopy.includes(this.selectedNode)) {
+          nodesToCopy.push(this.selectedNode);
+        }
         
-        // Store in clipboard (using localStorage for simplicity)
+        // Remove any nulls or undefineds
+        nodesToCopy = nodesToCopy.filter(id => id);
+        
+        console.log('Nodes to copy:', nodesToCopy);
+        
+        // Get the selected nodes
         const copiedJobs = this.jobs.filter(job => nodesToCopy.includes(job.id));
-        localStorage.setItem('canvas-clipboard', JSON.stringify({
-          type: 'nodes',
-          data: copiedJobs
-        }));
+        
+        console.log('Found jobs:', copiedJobs);
+        
+        // Get ONLY connections between selected nodes (internal subgraph connections)
+        // Both from AND to must be in the selected nodes
+        const copiedConnections = this.connections.filter(conn => 
+          nodesToCopy.includes(conn.from) && nodesToCopy.includes(conn.to)
+        );
+        
+        console.log('Found connections (internal only):', copiedConnections);
+        console.log('Excluded external connections:', 
+          this.connections.filter(conn => 
+            (nodesToCopy.includes(conn.from) || nodesToCopy.includes(conn.to)) &&
+            !(nodesToCopy.includes(conn.from) && nodesToCopy.includes(conn.to))
+          )
+        );
+        
+        // Deep clone the data to avoid reference issues
+        const clipboardData = {
+          type: 'subgraph',
+          nodes: JSON.parse(JSON.stringify(copiedJobs)),  // Deep clone
+          connections: JSON.parse(JSON.stringify(copiedConnections)),  // Deep clone
+          timestamp: Date.now()
+        };
+        
+        localStorage.setItem('canvas-clipboard', JSON.stringify(clipboardData));
+        
+        // Visual feedback
+        console.log(`Copied ${copiedJobs.length} nodes and ${copiedConnections.length} connections to clipboard`);
+        console.log('Clipboard data:', clipboardData);
+      } else {
+        console.log('No nodes selected to copy');
       }
     },
     cutSelectedNodes() {
+      console.log('cutSelectedNodes called');
+      console.log('Before copy - selectedNodes:', this.selectedNodes);
+      console.log('Before copy - selectedNode:', this.selectedNode);
+      
       this.copySelectedNodes();
+      
+      console.log('After copy, before delete - selectedNodes:', this.selectedNodes);
+      console.log('After copy, before delete - selectedNode:', this.selectedNode);
+      
       this.deleteSelectedNodes();
+      
+      console.log('After delete - selectedNodes:', this.selectedNodes);
+      console.log('After delete - selectedNode:', this.selectedNode);
     },
-    pasteNodes() {
+    pasteNodes(event) {
+      console.log('pasteNodes called', event);
       const clipboardData = localStorage.getItem('canvas-clipboard');
+      console.log('Raw clipboard data:', clipboardData);
+      
       if (clipboardData) {
         try {
-          const { type, data } = JSON.parse(clipboardData);
-          if (type === 'nodes' && data) {
-            // Snap paste position to grid if enabled
-            let pastePosition = { ...this.menuPosition };
+          const parsed = JSON.parse(clipboardData);
+          console.log('Parsed clipboard:', parsed);
+          
+          // Handle both old format (type: 'nodes') and new format (type: 'subgraph')
+          if ((parsed.type === 'nodes' || parsed.type === 'subgraph') && (parsed.data || parsed.nodes)) {
+            // Get paste position - use menu position, mouse position, or default
+            let pastePosition;
+            
+            // If called from context menu, use menu position
+            if (this.menuPosition) {
+              pastePosition = { ...this.menuPosition };
+            } 
+            // If called from keyboard shortcut, calculate position from mouse or use center
+            else {
+              const canvas = this.$el.querySelector('.drop-zone');
+              const rect = canvas.getBoundingClientRect();
+              
+              // Calculate center of visible area in canvas coordinates
+              // We need to account for zoom and transform
+              const centerX = (rect.width / 2 - this.canvasTransform.x) / this.zoom;
+              const centerY = (rect.height / 2 - this.canvasTransform.y) / this.zoom;
+              
+              pastePosition = {
+                x: centerX,
+                y: centerY
+              };
+              
+              console.log('Calculated paste position for keyboard shortcut:', pastePosition);
+              console.log('Canvas transform:', this.canvasTransform, 'Zoom:', this.zoom);
+            }
+            
+            console.log('Initial paste position:', pastePosition);
+            
             if (this.snapToGrid) {
               pastePosition.x = Math.round(pastePosition.x / this.gridSize) * this.gridSize;
               pastePosition.y = Math.round(pastePosition.y / this.gridSize) * this.gridSize;
+              console.log('Snapped paste position:', pastePosition);
             }
             
-            // Add the paste position from the context menu
+            // Prepare paste data with nodes and connections
             const pasteData = {
-              nodes: data,
-              position: pastePosition
+              nodes: parsed.nodes || parsed.data || [],
+              connections: parsed.connections || [],
+              position: pastePosition,
+              isSubgraph: parsed.type === 'subgraph'
             };
+            
+            console.log('Emitting paste-nodes with data:', pasteData);
             this.$emit('paste-nodes', pasteData);
+            
+            // Visual feedback
+            console.log(`Pasting ${pasteData.nodes.length} nodes and ${pasteData.connections.length} connections`);
+          } else {
+            console.log('Invalid clipboard format:', parsed);
           }
         } catch (e) {
           console.error('Failed to paste:', e);
         }
+      } else {
+        console.log('No clipboard data found');
       }
       this.hideContextMenu();
     },
     duplicateSelectedNodes() {
       if (this.selectedNodes.length > 0 || this.selectedNode) {
-        const nodesToDuplicate = this.selectedNodes.length > 0 ? 
-          this.selectedNodes : [this.selectedNode];
+        // Combine both selection types
+        let nodesToDuplicate = [...this.selectedNodes];
+        if (this.selectedNode && !nodesToDuplicate.includes(this.selectedNode)) {
+          nodesToDuplicate.push(this.selectedNode);
+        }
+        
+        // Remove any nulls or undefineds
+        nodesToDuplicate = nodesToDuplicate.filter(id => id);
         
         // Find the jobs to duplicate from the props
         const jobsToDuplicate = this.jobs.filter(job => nodesToDuplicate.includes(job.id));
@@ -820,7 +982,7 @@ export default {
         y: event.clientY - this.canvasTransform.y
       };
       // Clear any selection when starting to pan
-      this.clearNodeSelection();
+      this.clearSelection();
       event.preventDefault();
       event.stopPropagation();
     },
@@ -921,6 +1083,11 @@ export default {
         this.selectedNodes = [...new Set([...initialSelection, ...lassoSelection])];
       } else {
         this.selectedNodes = lassoSelection;
+      }
+      
+      // Clear single selection when we have multi-selection
+      if (this.selectedNodes.length > 0) {
+        this.selectedNode = null;
       }
       
       // Update single selected node for compatibility
@@ -1204,27 +1371,39 @@ export default {
       let maxX = -Infinity, maxY = -Infinity;
       
       this.jobs.forEach(job => {
-        minX = Math.min(minX, job.x || 0);
-        minY = Math.min(minY, job.y || 0);
-        maxX = Math.max(maxX, (job.x || 0) + 160);
-        maxY = Math.max(maxY, (job.y || 0) + 80);
+        const x = job.x !== undefined ? job.x : 100;
+        const y = job.y !== undefined ? job.y : 100;
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x + 180); // Use actual node width
+        maxY = Math.max(maxY, y + 80);  // Use actual node height
       });
       
+      // Handle case where all nodes are at same position
+      if (minX === maxX) {
+        maxX = minX + 180;
+      }
+      if (minY === maxY) {
+        maxY = minY + 80;
+      }
+      
       const canvas = this.$el.querySelector('.drop-zone');
+      if (!canvas) return;
+      
       const rect = canvas.getBoundingClientRect();
-      const padding = 50;
+      const padding = 80; // Increased padding for better visibility
       
       const contentWidth = maxX - minX + padding * 2;
       const contentHeight = maxY - minY + padding * 2;
       
       const scaleX = rect.width / contentWidth;
       const scaleY = rect.height / contentHeight;
-      const newZoom = Math.min(scaleX, scaleY, 1.5);
+      const newZoom = Math.min(scaleX, scaleY, 1.2); // Reduced max zoom for better visibility
       
-      this.zoom = newZoom;
+      this.zoom = Math.max(0.3, newZoom); // Ensure minimum zoom
       this.canvasTransform = {
-        x: (rect.width - contentWidth * newZoom) / 2 + padding * newZoom - minX * newZoom,
-        y: (rect.height - contentHeight * newZoom) / 2 + padding * newZoom - minY * newZoom
+        x: (rect.width - contentWidth * this.zoom) / 2 + padding * this.zoom - minX * this.zoom,
+        y: (rect.height - contentHeight * this.zoom) / 2 + padding * this.zoom - minY * this.zoom
       };
     },
     resetView() {
@@ -1250,7 +1429,7 @@ export default {
       this.panToolActive = !this.panToolActive;
       // Clear any ongoing operations
       if (this.panToolActive) {
-        this.clearNodeSelection();
+        this.clearSelection();
         this.isLassoSelecting = false;
       }
     },
@@ -2262,21 +2441,30 @@ export default {
     },
     copyNode() {
       if (this.menuTarget) {
-        // Store in clipboard
+        // For a single node, don't include any connections
+        // A single node can't have internal connections
+        
+        // Deep clone to avoid reference issues
         localStorage.setItem('canvas-clipboard', JSON.stringify({
-          type: 'nodes',
-          data: [this.menuTarget]
+          type: 'subgraph',
+          nodes: [JSON.parse(JSON.stringify(this.menuTarget))],
+          connections: [], // No connections for single node
+          timestamp: Date.now()
         }));
-        console.log('Node copied to clipboard:', this.menuTarget.id);
+        console.log('Node copied to clipboard (no connections):', this.menuTarget.id);
       }
       this.hideContextMenu();
     },
     cutNode() {
       if (this.menuTarget) {
-        // Store in clipboard
+        // For a single node, don't include any connections
+        
+        // Deep clone before deleting
         localStorage.setItem('canvas-clipboard', JSON.stringify({
-          type: 'nodes',
-          data: [this.menuTarget]
+          type: 'subgraph',
+          nodes: [JSON.parse(JSON.stringify(this.menuTarget))],
+          connections: [], // No connections for single node
+          timestamp: Date.now()
         }));
         // Delete the node
         this.$emit('delete-nodes', [this.menuTarget.id]);
@@ -2308,6 +2496,14 @@ export default {
     }
   },
   computed: {
+    totalSelectedCount() {
+      // Count total selected nodes from both selection types
+      const uniqueSelected = new Set(this.selectedNodes);
+      if (this.selectedNode && !uniqueSelected.has(this.selectedNode)) {
+        uniqueSelected.add(this.selectedNode);
+      }
+      return uniqueSelected.size;
+    },
     hasClipboard() {
       try {
         const clipboardData = localStorage.getItem('canvas-clipboard');

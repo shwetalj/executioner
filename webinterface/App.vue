@@ -1,7 +1,10 @@
 <template>
   <div class="min-h-screen" :class="theme.canvasBg">
+    <!-- Notification System -->
+    <NotificationSystem />
+    
     <!-- Header -->
-    <header class="shadow-sm border-b" :class="[theme.headerBg, theme.border]">
+    <header class="shadow-sm border-b" :class="[theme.headerBg, theme.border]" role="banner" aria-label="Application Header">
       <div class="px-6 py-4">
         <div class="flex items-center justify-between">
           <div class="flex items-center space-x-4">
@@ -25,18 +28,24 @@
             <div class="relative">
               <button @click="showThemeMenu = !showThemeMenu" 
                       class="px-3 py-2 rounded-lg transition-colors flex items-center space-x-2"
-                      :class="theme ? [theme.surface, theme.surfaceHover, theme.border, 'border'] : 'bg-white hover:bg-gray-50 border-gray-200 border'">
+                      :class="theme ? [theme.surface, theme.surfaceHover, theme.border, 'border'] : 'bg-white hover:bg-gray-50 border-gray-200 border'"
+                      aria-label="Theme selector"
+                      :aria-expanded="showThemeMenu">
                 <i class="fas fa-palette" :class="theme ? theme.text : ''"></i>
                 <span class="text-sm" :class="theme ? theme.text : ''">{{ theme ? theme.name : 'Light' }}</span>
                 <i class="fas fa-chevron-down text-xs" :class="theme ? theme.textMuted : ''"></i>
               </button>
               <div v-if="showThemeMenu" 
                    class="absolute right-0 mt-2 w-48 rounded-lg shadow-lg z-50 border"
-                   :class="theme ? [theme.surface, theme.border] : 'bg-white border-gray-200'">
+                   :class="theme ? [theme.surface, theme.border] : 'bg-white border-gray-200'"
+                   role="menu"
+                   aria-label="Theme selection menu">
                 <button v-for="(themeOption, key) in themes" :key="key"
                         @click="selectTheme(key)"
                         class="w-full px-4 py-2 text-left text-sm transition-colors"
-                        :class="theme ? [theme.surfaceHover, theme.text, key === currentTheme ? 'bg-indigo-600 text-white' : ''] : 'hover:bg-gray-50 text-gray-900'">
+                        :class="theme ? [theme.surfaceHover, theme.text, key === currentTheme ? 'bg-indigo-600 text-white' : ''] : 'hover:bg-gray-50 text-gray-900'"
+                        role="menuitem"
+                        :aria-selected="key === currentTheme">
                   {{ themeOption.name }}
                 </button>
               </div>
@@ -46,25 +55,33 @@
             <div class="flex items-center space-x-1 border-r pr-4 mr-2">
               <button @click="undo" :disabled="historyIndex <= 0" 
                       :class="['p-2 rounded transition-colors', historyIndex > 0 ? theme.surfaceHover + ' ' + theme.text : theme.textMuted + ' cursor-not-allowed']"
-                      title="Undo (Ctrl+Z)">
+                      title="Undo (Ctrl+Z)"
+                      aria-label="Undo last action">
                 <i class="fas fa-undo"></i>
               </button>
               <button @click="redo" :disabled="historyIndex >= history.length - 1"
                       :class="['p-2 rounded transition-colors', historyIndex < history.length - 1 ? theme.surfaceHover + ' ' + theme.text : theme.textMuted + ' cursor-not-allowed']"
-                      title="Redo (Ctrl+Shift+Z)">
+                      title="Redo (Ctrl+Shift+Z)"
+                      aria-label="Redo last undone action">
                 <i class="fas fa-redo"></i>
               </button>
             </div>
             
-            <button @click="newConfig" class="px-4 py-2 border rounded-lg transition-colors" :class="[theme.surface, theme.border, theme.surfaceHover, theme.text]">
+            <button @click="newConfig" class="px-4 py-2 border rounded-lg transition-colors" :class="[theme.surface, theme.border, theme.surfaceHover, theme.text]" aria-label="Create new configuration">
               <i class="fas fa-file-plus mr-2"></i>New Config
             </button>
-            <button @click="loadConfig" class="px-4 py-2 border rounded-lg transition-colors" :class="[theme.surface, theme.border, theme.surfaceHover, theme.text]">
-              <i class="fas fa-folder-open mr-2"></i>Load Config
+            <button @click="loadConfig" :disabled="isLoading" class="px-4 py-2 border rounded-lg transition-colors relative" :class="[theme.surface, theme.border, theme.surfaceHover, theme.text, isLoading ? 'opacity-50 cursor-not-allowed' : '']" aria-label="Load configuration from file" :aria-busy="isLoading">
+              <LoadingSpinner v-if="isLoading" size="small" inline class="mr-2" />
+              <i v-else class="fas fa-folder-open mr-2"></i>
+              {{ isLoading ? 'Loading...' : 'Load Config' }}
             </button>
-            <button @click="saveConfig" class="px-4 py-2 rounded-lg transition-colors" :class="[theme.accent, theme.accentText, theme.accentHover]"
-                    title="Save (Ctrl+S)">
-              <i class="fas fa-save mr-2"></i>Save Config
+            <button @click="saveConfig" :disabled="isSaving" class="px-4 py-2 rounded-lg transition-colors relative" :class="[theme.accent, theme.accentText, theme.accentHover, isSaving ? 'opacity-50 cursor-not-allowed' : '']"
+                    title="Save (Ctrl+S)"
+                    aria-label="Save configuration to file"
+                    :aria-busy="isSaving">
+              <LoadingSpinner v-if="isSaving" size="small" inline class="mr-2" />
+              <i v-else class="fas fa-save mr-2"></i>
+              {{ isSaving ? 'Saving...' : 'Save Config' }}
             </button>
           </div>
         </div>
@@ -76,10 +93,12 @@
       <!-- Left Sidebar - Jobs List -->
       <aside class="relative border-r overflow-y-auto flex-shrink-0" 
              :style="{ width: panelSizes.sidebar + 'px' }"
-             :class="[theme.sidebarBg, theme.border]">
+             :class="[theme.sidebarBg, theme.border]"
+             role="complementary"
+             aria-label="Jobs Configuration Panel">
         <!-- Application Config Section -->
         <div class="p-6 border-b" :class="theme.border">
-          <button @click="showConfigModal = true" class="w-full text-left transition-colors" :class="[theme.text, 'hover:text-indigo-600']">
+          <button @click="openConfigModal" class="w-full text-left transition-colors" :class="[theme.text, 'hover:text-indigo-600']" aria-label="Open application configuration dialog">
             <h2 class="text-lg font-semibold" :class="theme.text">
               <i class="fas fa-cog mr-2"></i>Application Config
             </h2>
@@ -94,10 +113,22 @@
              @mouseleave="endPointerSelection">
           <div class="flex items-center justify-between mb-4">
             <h2 class="text-lg font-semibold" :class="theme.text">Jobs</h2>
-            <button @click="addNewJob" class="px-3 py-1 text-sm rounded-lg transition-colors" :class="[theme.accent, theme.accentText, theme.accentHover]">
+            <button @click="addNewJob" class="px-3 py-1 text-sm rounded-lg transition-colors" :class="[theme.accent, theme.accentText, theme.accentHover]" aria-label="Add new job">
               <i class="fas fa-plus mr-1"></i>Add Job
             </button>
           </div>
+          
+          <!-- Job Search and Filter -->
+          <!-- Temporarily disabled for debugging
+          <div class="mb-4">
+            <JobSearchFilter 
+              ref="jobSearchFilter"
+              :jobs="jobs"
+              :total-count="jobs.length"
+              :filtered-count="filteredJobs.length"
+              @filter-change="handleFilterChange" />
+          </div>
+          -->
           
           <!-- Multi-select hints -->
           <div class="text-xs mb-2 p-2 rounded" :class="[theme.secondary, theme.textMuted]">
@@ -174,26 +205,46 @@
       </div>
 
       <!-- Main Content Area -->
-      <main class="flex-1 flex flex-col h-full">
+      <main class="flex-1 flex flex-col h-full" role="main" aria-label="Main content area">
         <!-- Tabs -->
-        <div class="border-b" :class="[theme.surface, theme.border]">
+        <div class="border-b" :class="[theme.surface, theme.border]" role="tablist" aria-label="Editor view tabs">
           <div class="flex">
-            <button @click="activeTab = 'visual'" 
-                    :class="['px-6 py-3 text-sm font-medium transition-colors', activeTab === 'visual' ? 'text-indigo-600 border-b-2 border-indigo-600' : theme.textMuted + ' ' + theme.surfaceHover]">
+            <button @click="switchToVisualTab" 
+                    :class="['px-6 py-3 text-sm font-medium transition-colors', activeTab === 'visual' ? 'text-indigo-600 border-b-2 border-indigo-600' : theme.textMuted + ' ' + theme.surfaceHover]"
+                    role="tab"
+                    :aria-selected="activeTab === 'visual'"
+                    aria-controls="visual-editor-panel"
+                    id="visual-editor-tab">
               <i class="fas fa-project-diagram mr-2"></i>Visual Editor
             </button>
-            <button @click="activeTab = 'json'" 
-                    :class="['px-6 py-3 text-sm font-medium transition-colors', activeTab === 'json' ? 'text-indigo-600 border-b-2 border-indigo-600' : theme.textMuted + ' ' + theme.surfaceHover]">
+            <button @click="switchToJsonTab" 
+                    :class="['px-6 py-3 text-sm font-medium transition-colors', activeTab === 'json' ? 'text-indigo-600 border-b-2 border-indigo-600' : theme.textMuted + ' ' + theme.surfaceHover]"
+                    role="tab"
+                    :aria-selected="activeTab === 'json'"
+                    aria-controls="json-editor-panel"
+                    id="json-editor-tab">
               <i class="fas fa-code mr-2"></i>JSON Editor
             </button>
           </div>
         </div>
 
         <!-- Tab Content -->
-        <div class="flex-1 overflow-hidden">
+        <div class="flex-1 overflow-hidden relative">
+          <!-- Loading overlay for canvas operations -->
+          <LoadingSpinner 
+            v-if="isProcessing" 
+            overlay 
+            :message="loadingMessage || 'Processing...'" 
+          />
+          
           <!-- Visual Editor Tab -->
-          <div v-show="activeTab === 'visual'" class="h-full">
-            <WorkflowCanvas :jobs="canvasJobs" :connections="connections" 
+          <div v-show="activeTab === 'visual'" class="h-full" 
+               role="tabpanel"
+               id="visual-editor-panel"
+               aria-labelledby="visual-editor-tab"
+               tabindex="0">
+            <WorkflowCanvas ref="workflowCanvas"
+                           :jobs="canvasJobs" :connections="connections" 
                            :theme="theme"
                            @update-positions="updateJobPositions"
                            @add-connection="addConnection"
@@ -211,7 +262,11 @@
           </div>
 
           <!-- JSON Editor Tab -->
-          <div v-show="activeTab === 'json'" class="h-full">
+          <div v-show="activeTab === 'json'" class="h-full"
+               role="tabpanel"
+               id="json-editor-panel"
+               aria-labelledby="json-editor-tab"
+               tabindex="0">
             <JsonEditor v-model="configJson" :theme="theme" @update="updateFromJson" />
           </div>
         </div>
@@ -229,17 +284,36 @@
       <aside v-if="selectedJob && activeTab === 'visual'" 
              class="border-l overflow-y-auto flex-shrink-0" 
              :style="{ width: panelSizes.jobEditor + 'px' }"
-             :class="[theme.surface, theme.border]">
-        <JobEditor :job="selectedJob" :theme="theme" @update="updateJob" @close="selectedJob = null" />
+             :class="[theme.surface, theme.border]"
+             role="complementary"
+             aria-label="Job configuration editor">
+        <!-- Use ValidatedJobEditor for improved validation -->
+        <ValidatedJobEditor 
+          v-if="useValidatedEditor"
+          :job="selectedJob"
+          :theme="theme"
+          @save="updateJobWithValidation" 
+          @cancel="selectedJob = null" />
+        <!-- Fallback to original JobEditor if needed -->
+        <JobEditor 
+          v-else
+          :job="selectedJob" 
+          :theme="theme" 
+          @update="updateJob" 
+          @close="selectedJob = null" />
       </aside>
     </div>
     
     <!-- Application Config Modal -->
-    <div v-if="showConfigModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" @click.self="showConfigModal = false">
-      <div class="rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col" :class="theme.surface">
+    <div v-if="showConfigModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" @click.self="closeConfigModal"
+         role="dialog"
+         aria-modal="true"
+         aria-labelledby="config-modal-title">
+      <div ref="configModalRef" class="rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col" :class="theme.surface">
         <div class="px-6 py-4 border-b flex items-center justify-between" :class="theme.border">
-          <h2 class="text-xl font-semibold" :class="theme.text">Application Configuration</h2>
-          <button @click="showConfigModal = false" class="transition-colors" :class="[theme.textMuted, 'hover:' + theme.text]">
+          <h2 id="config-modal-title" class="text-xl font-semibold" :class="theme.text">Application Configuration</h2>
+          <button @click="closeConfigModal" class="transition-colors" :class="[theme.textMuted, 'hover:' + theme.text]"
+                  aria-label="Close configuration dialog">
             <i class="fas fa-times text-xl"></i>
           </button>
         </div>
@@ -319,6 +393,17 @@ import WorkflowCanvas from './components/WorkflowCanvas.vue';
 import ApplicationConfig from './components/ApplicationConfig.vue';
 import JsonEditor from './components/JsonEditor.vue';
 import JobEditor from './components/JobEditor.vue';
+import ValidatedJobEditor from './components/ValidatedJobEditor.vue';
+import NotificationSystem from './components/NotificationSystem.vue';
+import JobSearchFilter from './components/JobSearchFilter.vue';
+import LoadingSpinner from './components/LoadingSpinner.vue';
+import SkeletonLoader from './components/SkeletonLoader.vue';
+
+// Import validation and error handling utilities
+import { validateJobConfig, validateEmailConfig, sanitizeConfigForDisplay } from './src/utils/validation.js';
+import { handleError, showNotification } from './src/utils/errorHandler.js';
+import { fixOverlappingNodes, needsRepositioning, smartAutoArrange } from './src/utils/nodePositioning.js';
+import { useFocusTrap, useAnnouncer } from './src/composables/useFocusManagement.js';
 
 export default {
   name: 'App',
@@ -326,13 +411,26 @@ export default {
     WorkflowCanvas,
     ApplicationConfig,
     JsonEditor,
-    JobEditor
+    JobEditor,
+    ValidatedJobEditor,
+    NotificationSystem,
+    JobSearchFilter,
+    LoadingSpinner,
+    SkeletonLoader
   },
   data() {
     return {
       activeTab: 'visual',
       jobs: [],
       canvasJobs: [],
+      filteredJobs: [],
+      filterSettings: {},
+      useValidatedEditor: true, // Use the new validated editor with security features
+      // Loading states
+      isLoading: false,
+      isSaving: false,
+      isProcessing: false,
+      loadingMessage: '',
       connections: [],
       selectedJob: null,
       selectedJobs: [], // Track multiple selected jobs
@@ -353,8 +451,8 @@ export default {
       },
       // Panel resizing
       panelSizes: {
-        sidebar: 256, // 16rem = 256px (w-64)
-        jobEditor: 384 // 24rem = 384px (w-96)
+        sidebar: 240, // Optimal size for job list
+        jobEditor: 320 // Reduced for more canvas space
       },
       isResizing: {
         sidebar: false,
@@ -578,6 +676,66 @@ export default {
     }
   },
   methods: {
+    // Modal management with focus trap
+    openConfigModal() {
+      this.showConfigModal = true;
+      this.$nextTick(() => {
+        if (this.$refs.configModalRef) {
+          // Create focus trap for modal
+          this.configModalFocusTrap = useFocusTrap({ value: this.$refs.configModalRef });
+          this.configModalFocusTrap.activate();
+        }
+      });
+    },
+    closeConfigModal() {
+      if (this.configModalFocusTrap) {
+        this.configModalFocusTrap.deactivate();
+        this.configModalFocusTrap = null;
+      }
+      this.showConfigModal = false;
+    },
+    // Filter and search methods
+    handleFilterChange(filters) {
+      this.filterSettings = filters;
+      this.applyFilters();
+    },
+    applyFilters() {
+      if (this.$refs.jobSearchFilter) {
+        this.filteredJobs = this.$refs.jobSearchFilter.filterJobs(this.jobs);
+      } else {
+        this.filteredJobs = [...this.jobs];
+      }
+    },
+    
+    // Validation methods
+    updateJobWithValidation(updatedJob) {
+      try {
+        // Validate the job configuration
+        const validation = validateJobConfig(updatedJob);
+        if (!validation.valid) {
+          handleError({ 
+            code: 'VALIDATION_ERROR', 
+            message: validation.errors.join(', ') 
+          }, 'Job Update');
+          return;
+        }
+        
+        // Show warnings if any
+        if (validation.warnings && validation.warnings.length > 0) {
+          validation.warnings.forEach(warning => {
+            showNotification(warning, 'warning');
+          });
+        }
+        
+        // Update the job
+        this.updateJob(updatedJob);
+        showNotification('Job configuration updated successfully', 'success');
+        this.selectedJob = null;
+      } catch (error) {
+        handleError(error, 'Job Update');
+      }
+    },
+    
     // Multi-select methods
     isJobSelected(jobId) {
       return this.selectedJobs.includes(jobId);
@@ -940,11 +1098,25 @@ export default {
       if (saved) {
         try {
           const sizes = JSON.parse(saved);
+          // Apply constraints when loading to prevent invalid sizes
+          if (sizes.sidebar) {
+            sizes.sidebar = Math.min(Math.max(sizes.sidebar, 200), 400); // Constrain sidebar
+          }
+          if (sizes.jobEditor) {
+            sizes.jobEditor = Math.min(Math.max(sizes.jobEditor, 250), 500); // Constrain job editor
+          }
           this.panelSizes = { ...this.panelSizes, ...sizes };
         } catch (e) {
           console.error('Failed to load panel sizes:', e);
         }
       }
+    },
+    resetPanelSizes() {
+      this.panelSizes = {
+        sidebar: 240,
+        jobEditor: 320
+      };
+      this.savePanelSizes();
     },
     deleteSelectedJobs() {
       if (this.selectedJobs.length === 0) return;
@@ -1031,6 +1203,9 @@ export default {
       input.onchange = (e) => {
         const file = e.target.files[0];
         if (file) {
+          this.isLoading = true;
+          this.loadingMessage = 'Loading configuration...';
+          
           this.currentFileName = file.name.replace('.json', '');
           this.currentFilePath = file.name;
           const reader = new FileReader();
@@ -1039,10 +1214,14 @@ export default {
               const config = JSON.parse(e.target.result);
               this.loadFromConfig(config);
               this.isModified = false;
+              showNotification('Configuration loaded successfully', 'success');
             } catch (error) {
-              alert('Invalid JSON file');
+              handleError(error, 'Load Configuration');
               this.currentFileName = null;
               this.currentFilePath = null;
+            } finally {
+              this.isLoading = false;
+              this.loadingMessage = '';
             }
           };
           reader.readAsText(file);
@@ -1051,21 +1230,58 @@ export default {
       input.click();
     },
     saveConfig() {
-      // Include canvas positions in saved jobs
-      const jobsWithPositions = this.jobs.map(job => {
-        const canvasJob = this.canvasJobs.find(cj => cj.id === job.id);
-        if (canvasJob) {
-          return {
-            ...job,
-            x: canvasJob.x,
-            y: canvasJob.y
-          };
-        }
-        return job;
-      });
+      this.isSaving = true;
+      this.loadingMessage = 'Saving configuration...';
       
-      const config = {
-        ...this.appConfig,
+      try {
+        // Validate all jobs before saving
+        const jobErrors = [];
+        const jobWarnings = [];
+        
+        this.jobs.forEach((job, index) => {
+          const validation = validateJobConfig(job);
+          if (!validation.valid) {
+            jobErrors.push(`Job ${job.id || index}: ${validation.errors.join(', ')}`);
+          }
+          if (validation.warnings && validation.warnings.length > 0) {
+            jobWarnings.push(`Job ${job.id || index}: ${validation.warnings.join(', ')}`);
+          }
+        });
+        
+        // Validate email configuration
+        const emailValidation = validateEmailConfig(this.appConfig);
+        if (!emailValidation.valid) {
+          jobErrors.push(`Email config: ${emailValidation.errors.join(', ')}`);
+        }
+        
+        // Show errors and prevent save if validation fails
+        if (jobErrors.length > 0) {
+          handleError({
+            code: 'VALIDATION_ERROR',
+            message: 'Configuration validation failed'
+          }, 'Save Config');
+          jobErrors.forEach(error => showNotification(error, 'error'));
+          return;
+        }
+        
+        // Show warnings but allow save
+        jobWarnings.forEach(warning => showNotification(warning, 'warning'));
+        
+        // Include canvas positions in saved jobs
+        const jobsWithPositions = this.jobs.map(job => {
+          const canvasJob = this.canvasJobs.find(cj => cj.id === job.id);
+          if (canvasJob) {
+            return {
+              ...job,
+              x: canvasJob.x,
+              y: canvasJob.y
+            };
+          }
+          return job;
+        });
+        
+        const config = {
+          ...this.appConfig,
         jobs: jobsWithPositions
       };
       const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' });
@@ -1076,10 +1292,20 @@ export default {
       a.click();
       URL.revokeObjectURL(url);
       this.isModified = false;
+      
+      // Show success notification
+      showNotification('Configuration saved successfully', 'success');
+      
       // Update the file path if saving for the first time
       if (!this.currentFilePath) {
         this.currentFilePath = a.download;
         this.currentFileName = a.download.replace('.json', '');
+      }
+      } catch (error) {
+        handleError(error, 'Save Configuration');
+      } finally {
+        this.isSaving = false;
+        this.loadingMessage = '';
       }
     },
     loadFromConfig(config) {
@@ -1113,9 +1339,50 @@ export default {
     updateFromJson(jsonString) {
       try {
         const config = JSON.parse(jsonString);
-        this.loadFromConfig(config);
+        
+        // Store current canvas positions before updating
+        const currentPositions = {};
+        this.canvasJobs.forEach(job => {
+          currentPositions[job.id] = { x: job.x, y: job.y };
+        });
+        
+        // Update configuration
+        const { jobs, ...appConfig } = config;
+        this.appConfig = { ...this.appConfig, ...appConfig };
+        this.jobs = jobs || [];
+        
+        // Update canvas jobs while preserving positions
+        let newCanvasJobs = [];
+        this.jobs.forEach((job) => {
+          const existingPosition = currentPositions[job.id];
+          newCanvasJobs.push({
+            ...job,
+            // Preserve existing canvas position if available, use from JSON, or default to 0
+            x: existingPosition?.x ?? job.x ?? 0,
+            y: existingPosition?.y ?? job.y ?? 0
+          });
+        });
+        
+        // Check if nodes need repositioning (overlapping or all at origin)
+        if (needsRepositioning(newCanvasJobs)) {
+          // Use smart auto-arrange to fix positions
+          newCanvasJobs = smartAutoArrange(newCanvasJobs, this.connections, {
+            preserveManual: true,
+            horizontalSpacing: 250,
+            verticalSpacing: 150
+          });
+        } else {
+          // Just fix any minor overlaps
+          newCanvasJobs = fixOverlappingNodes(newCanvasJobs);
+        }
+        
+        this.canvasJobs = newCanvasJobs;
+        this.connections = [];
+        this.updateConnectionsFromJobs();
+        
       } catch (error) {
         console.error('Invalid JSON:', error);
+        handleError(error, 'JSON Parse Error');
       }
     },
     addNewJob() {
@@ -1370,45 +1637,93 @@ export default {
       this.connections = [];
     },
     deleteCanvasNodes(nodeIds) {
-      // Remove nodes from canvas
-      this.canvasJobs = this.canvasJobs.filter(job => !nodeIds.includes(job.id));
+      console.log('deleteCanvasNodes called with:', nodeIds);
+      console.log('Before deletion - Jobs:', this.jobs.map(j => j.id));
+      console.log('Before deletion - Canvas Jobs:', this.canvasJobs.map(j => j.id));
+      
+      // Remove nodes from BOTH canvas and main jobs array
+      // Use filter to create new arrays for proper Vue reactivity
+      const newCanvasJobs = this.canvasJobs.filter(job => !nodeIds.includes(job.id));
+      const newJobs = this.jobs.filter(job => !nodeIds.includes(job.id));
+      
+      // Assign the new arrays
+      this.canvasJobs = newCanvasJobs;
+      this.jobs = newJobs;
+      
+      console.log('After deletion - Jobs:', this.jobs.map(j => j.id));
+      console.log('After deletion - Canvas Jobs:', this.canvasJobs.map(j => j.id));
       
       // Remove connections involving these nodes
       this.connections = this.connections.filter(conn => 
         !nodeIds.includes(conn.from) && !nodeIds.includes(conn.to)
       );
       
-      // Update dependencies in the main jobs array
-      nodeIds.forEach(nodeId => {
-        this.jobs.forEach(job => {
-          if (job.dependencies && job.dependencies.includes(nodeId)) {
-            job.dependencies = job.dependencies.filter(dep => dep !== nodeId);
+      // Update dependencies in remaining jobs
+      this.jobs.forEach(job => {
+        if (job.dependencies && job.dependencies.length > 0) {
+          const originalDeps = [...job.dependencies];
+          job.dependencies = job.dependencies.filter(dep => !nodeIds.includes(dep));
+          if (originalDeps.length !== job.dependencies.length) {
+            console.log(`Updated dependencies for ${job.id}: ${originalDeps} -> ${job.dependencies}`);
           }
-        });
+        }
+      });
+      
+      // Also update dependencies in canvas jobs
+      this.canvasJobs.forEach(job => {
+        if (job.dependencies && job.dependencies.length > 0) {
+          job.dependencies = job.dependencies.filter(dep => !nodeIds.includes(dep));
+        }
+      });
+      
+      // Force update to ensure canvas re-renders
+      this.$nextTick(() => {
+        console.log('After nextTick - Canvas should be updated');
+        console.log('Current canvas jobs:', this.canvasJobs.map(j => j.id));
       });
       
       this.saveToHistory();
     },
     pasteCanvasNodes(pasteData) {
-      // Handle both old format (array) and new format (object with position)
-      let nodes, pastePosition;
+      console.log('App.vue: pasteCanvasNodes called with:', pasteData);
+      
+      // Handle both old format (array) and new format (object with position and connections)
+      let nodes, connections = [], pastePosition;
       if (Array.isArray(pasteData)) {
         // Old format - just an array of nodes
         nodes = pasteData;
         pastePosition = null;
       } else {
-        // New format - object with nodes and position
+        // New format - object with nodes, connections, and position
         nodes = pasteData.nodes || [];
+        connections = pasteData.connections || [];
         pastePosition = pasteData.position || null;
       }
       
-      // Generate new IDs and add nodes to canvas
+      console.log('Processing paste:', { 
+        nodeCount: nodes.length, 
+        connectionCount: connections.length,
+        position: pastePosition 
+      });
+      
+      // Generate new IDs and create ID mapping
       const timestamp = Date.now();
       const spacing = 30; // Spacing between pasted nodes
+      const idMapping = {}; // Map old IDs to new IDs
       
+      console.log(`Starting to process ${nodes.length} nodes for paste`);
+      
+      // First pass: create new nodes with new IDs
       nodes.forEach((node, index) => {
+        console.log(`Processing node ${index + 1}/${nodes.length}: ${node.id}`);
         const newNode = JSON.parse(JSON.stringify(node));
-        newNode.id = `${node.id}_paste_${timestamp}_${index}`;
+        const oldId = node.id;
+        const newId = `${node.id}_paste_${timestamp}_${index}`;
+        
+        console.log(`Creating new node: ${oldId} -> ${newId}`);
+        
+        idMapping[oldId] = newId;
+        newNode.id = newId;
         
         // If we have a paste position (from context menu), use it
         if (pastePosition) {
@@ -1420,28 +1735,82 @@ export default {
           newNode.y = (node.y || 100) + spacing;
         }
         
-        newNode.dependencies = []; // Clear dependencies for pasted nodes
+        console.log(`Node position: x=${newNode.x}, y=${newNode.y}`);
+        
+        newNode.dependencies = []; // Will be set based on connections
         
         // Add to main jobs list first
         const mainJob = {
           id: newNode.id,
           description: newNode.description || '',
           command: newNode.command || '',
-          dependencies: [],
-          timeout: newNode.timeout,
+          dependencies: newNode.dependencies || [],
+          timeout: newNode.timeout || 300,
           env_variables: newNode.env_variables || {},
           pre_checks: newNode.pre_checks || [],
           post_checks: newNode.post_checks || [],
+          max_retries: newNode.max_retries,
+          retry_delay: newNode.retry_delay,
           x: newNode.x,
           y: newNode.y
         };
         
         if (!this.jobs.find(j => j.id === newNode.id)) {
           this.jobs.push(mainJob);
+          console.log(`Added to jobs array: ${mainJob.id}`);
+        } else {
+          console.log(`Job already exists: ${mainJob.id}`);
         }
         
         // Add to canvas
         this.canvasJobs.push({...mainJob});
+        console.log(`Added to canvas: ${mainJob.id} at (${mainJob.x}, ${mainJob.y})`);
+      });
+      
+      console.log(`Total jobs after paste: ${this.jobs.length}`);
+      console.log(`Total canvas jobs after paste: ${this.canvasJobs.length}`);
+      
+      // Second pass: recreate connections with new IDs
+      console.log('ID Mapping:', idMapping);
+      console.log('Processing connections:', connections);
+      
+      connections.forEach(conn => {
+        const newFromId = idMapping[conn.from];
+        const newToId = idMapping[conn.to];
+        
+        console.log(`Mapping connection: ${conn.from} -> ${conn.to} becomes ${newFromId} -> ${newToId}`);
+        
+        if (newFromId && newToId) {
+          // Add the connection
+          const newConnection = {
+            from: newFromId,
+            to: newToId
+          };
+          
+          // Add to connections array if not already exists
+          if (!this.connections.find(c => c.from === newFromId && c.to === newToId)) {
+            this.connections.push(newConnection);
+          }
+          
+          // Update dependencies in the job
+          const toJob = this.jobs.find(j => j.id === newToId);
+          if (toJob && !toJob.dependencies.includes(newFromId)) {
+            toJob.dependencies.push(newFromId);
+          }
+          
+          // Also update in canvas jobs
+          const canvasToJob = this.canvasJobs.find(j => j.id === newToId);
+          if (canvasToJob && !canvasToJob.dependencies.includes(newFromId)) {
+            canvasToJob.dependencies.push(newFromId);
+          }
+        }
+      });
+      
+      // Visual feedback
+      showNotification({
+        type: 'success',
+        message: `Pasted ${nodes.length} node(s) and ${connections.length} connection(s)`,
+        duration: 2000
       });
       
       this.saveToHistory();
@@ -1573,6 +1942,49 @@ export default {
         event.preventDefault();
         this.startRename(this.selectedJob);
       }
+      // New file: Ctrl+N or Cmd+N
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'n') {
+        event.preventDefault();
+        this.newConfig();
+      }
+      // Open file: Ctrl+O or Cmd+O
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'o') {
+        event.preventDefault();
+        this.loadConfig();
+      }
+      // Delete selected: Delete or Backspace
+      if ((event.key === 'Delete' || event.key === 'Backspace') && this.selectedJob && !this.renamingJobId) {
+        event.preventDefault();
+        this.removeJob(this.selectedJob.id);
+      }
+      // Tab navigation between panels
+      if (event.key === 'Tab' && !event.shiftKey && !event.ctrlKey) {
+        // Let default tab navigation work
+      }
+      // Escape to cancel operations
+      if (event.key === 'Escape') {
+        if (this.renamingJobId) {
+          this.cancelRename();
+        }
+        if (this.selectedJob) {
+          this.selectedJob = null;
+        }
+        if (this.showConfigModal) {
+          this.closeConfigModal();
+        }
+        if (this.showThemeMenu) {
+          this.showThemeMenu = false;
+        }
+      }
+      // Switch tabs: Ctrl+1 for Visual, Ctrl+2 for JSON
+      if ((event.ctrlKey || event.metaKey) && event.key === '1') {
+        event.preventDefault();
+        this.switchToVisualTab();
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key === '2') {
+        event.preventDefault();
+        this.switchToJsonTab();
+      }
     },
     debouncedSaveToHistory() {
       if (this.skipHistorySave) return;
@@ -1666,9 +2078,105 @@ export default {
         this.showThemeMenu = false;
         document.removeEventListener('click', this.closeThemeMenu);
       }
+    },
+    switchToVisualTab() {
+      this.activeTab = 'visual';
+      // Reset canvas view and ensure all nodes are visible when switching back
+      this.$nextTick(() => {
+        const canvas = this.$refs.workflowCanvas;
+        if (canvas) {
+          // First check if nodes need repositioning
+          if (this.canvasJobs.length > 0 && needsRepositioning(this.canvasJobs)) {
+            // Fix overlapping nodes without destroying manual arrangements
+            this.canvasJobs = fixOverlappingNodes(this.canvasJobs, {
+              minDistance: 150,
+              nodeWidth: 180,
+              nodeHeight: 80
+            });
+            
+            // If still problematic, do full auto-arrange
+            if (needsRepositioning(this.canvasJobs)) {
+              canvas.autoArrangeHierarchy();
+            }
+          }
+          
+          // Always fit to screen after a short delay to ensure everything is visible
+          // This fixes the issue where parts of the DAG are hidden after tab switch
+          setTimeout(() => {
+            if (this.canvasJobs.length > 0) {
+              canvas.fitToScreen();
+            } else {
+              // If no jobs, just reset the view to default
+              canvas.resetView();
+            }
+          }, 150);
+        }
+      });
+    },
+    switchToJsonTab() {
+      this.activeTab = 'json';
+      // Store current canvas state before switching
+      this.canvasStateBeforeJson = {
+        zoom: this.$refs.workflowCanvas?.zoom || 1,
+        transform: this.$refs.workflowCanvas?.canvasTransform || { x: 0, y: 0 }
+      };
+    },
+    
+    // Global error handlers
+    handleGlobalError(event) {
+      console.error('Global error:', event.error);
+      handleError({
+        code: 'RUNTIME_ERROR',
+        message: event.error?.message || 'An unexpected error occurred',
+        stack: event.error?.stack
+      }, 'Runtime Error');
+      
+      // Prevent default error handling
+      event.preventDefault();
+    },
+    
+    handleUnhandledRejection(event) {
+      console.error('Unhandled promise rejection:', event.reason);
+      handleError({
+        code: 'UNHANDLED_REJECTION',
+        message: event.reason?.message || event.reason || 'Unhandled promise rejection',
+        stack: event.reason?.stack
+      }, 'Promise Rejection');
+      
+      // Prevent default rejection handling
+      event.preventDefault();
     }
   },
+  errorCaptured(error, vm, info) {
+    // Global error boundary for the entire application
+    console.error('Error captured in App.vue:', error, info);
+    
+    // Handle different types of errors
+    if (error.name === 'ValidationError') {
+      handleError({
+        code: 'VALIDATION_ERROR',
+        message: error.message || 'Validation failed'
+      }, `Component: ${vm?.$options.name || 'Unknown'}`);
+    } else if (error.message?.includes('Network')) {
+      handleError({
+        code: 'NETWORK_ERROR',
+        message: error.message
+      }, 'Network Operation');
+    } else {
+      handleError(error, `Component Error: ${info}`);
+    }
+    
+    // Prevent the error from propagating
+    return false;
+  },
   mounted() {
+    // Initialize filtered jobs
+    this.filteredJobs = [...this.jobs];
+    
+    // Set up global error handlers
+    window.addEventListener('error', this.handleGlobalError);
+    window.addEventListener('unhandledrejection', this.handleUnhandledRejection);
+    
     // Load saved theme
     const savedTheme = localStorage.getItem('selectedTheme');
     if (savedTheme && this.themes[savedTheme]) {
@@ -1685,12 +2193,17 @@ export default {
     });
   },
   beforeUnmount() {
+    // Clean up event listeners
     document.removeEventListener('keydown', this.handleKeyDown);
+    window.removeEventListener('error', this.handleGlobalError);
+    window.removeEventListener('unhandledrejection', this.handleUnhandledRejection);
   }
 };
 </script>
 
 <style scoped>
+/* Import accessibility styles */
+@import './src/styles/accessibility.css';
 
 /* Context menu animation */
 .context-menu-enter-active,
