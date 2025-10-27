@@ -258,6 +258,8 @@ See README.md and docs/ directory in the project repository.
     history_group = parser.add_argument_group("History and reporting")
     history_group.add_argument("--list-runs", nargs='?', const=True, metavar="APP_NAME",
                              help="List recent execution history (optionally filtered by app name) and exit")
+    history_group.add_argument("--limit", type=int, default=100, metavar="N",
+                             help="Number of entries to show with --list-runs (default: 100)")
     history_group.add_argument("--show-run", type=int, metavar="RUN_ID", help="Show detailed job status for a specific run ID")
 
     # Logging and debugging options
@@ -317,7 +319,8 @@ See README.md and docs/ directory in the project repository.
 
         # Get recent runs, optionally filtered by app name
         app_filter = args.list_runs if isinstance(args.list_runs, str) else None
-        recent_runs = job_history.get_recent_runs(limit=20, app_name=app_filter)
+        limit = getattr(args, 'limit', 100)  # Default to 100 if not specified
+        recent_runs = job_history.get_recent_runs(limit=limit, app_name=app_filter)
 
         if not recent_runs:
             if app_filter:
@@ -333,17 +336,21 @@ See README.md and docs/ directory in the project repository.
             print(f"\nRecent Execution History for '{app_filter}':")
         else:
             print("\nRecent Execution History:")
-        print("=" * 100)
-        print(f"{'Run ID':>7} | {'Application':20} | {'Status':10} | {'Start Time':19} | {'Duration':>8} | {'Jobs':>12}")
-        print("-" * 100)
+        print("=" * 110)
+        print(f"{'Run':>7} | {'Attempt':>7} | {'Application':20} | {'Status':10} | {'Start Time':19} | {'Duration':>8} | {'Jobs':>12}")
+        print("-" * 110)
 
         for run in recent_runs:
             run_id = run['run_id']
+            attempt_id = run.get('attempt_id', 1)  # Default to 1 for old data
             app_name = run['application_name'][:20]
             status = run['status']
             start_time = run['start_time'] or 'N/A'
             duration = run['duration'] or 'N/A'
             job_summary = run['job_summary']
+            
+            # Format attempt display
+            attempt_display = f"#{attempt_id}"
 
             # Color code status (only if terminal supports it)
             if sys.stdout.isatty() and os.environ.get('TERM') != 'dumb':
@@ -356,10 +363,10 @@ See README.md and docs/ directory in the project repository.
             else:
                 status_display = f"{status:10}"
 
-            print(f"{run_id:>7} | {app_name:20} | {status_display} | {start_time:19} | {duration:>8} | {job_summary:>12}")
+            print(f"{run_id:>7} | {attempt_display:>7} | {app_name:20} | {status_display} | {start_time:19} | {duration:>8} | {job_summary:>12}")
 
-        print("\nTo resume a failed run: executioner.py -c <config> --resume-from <RUN_ID>")
-        print("To resume only failed jobs: executioner.py -c <config> --resume-from <RUN_ID> --resume-failed-only")
+        print("\nTo resume a failed run: executioner.py -c <config> --resume-from <RUN>")
+        print("To resume only failed jobs: executioner.py -c <config> --resume-from <RUN> --resume-failed-only")
         sys.exit(0)
 
     # Handle --show-run flag
@@ -387,14 +394,16 @@ See README.md and docs/ directory in the project repository.
 
         # Display run header
         run_info = run_details['run_info']
-        print(f"\nRun Details for ID {args.show_run}:")
+        attempt_id = run_info.get('attempt_id', 1)
+        print(f"\nRun Details for ID {args.show_run} (All Attempts):")
         print("=" * 80)
         print(f"Application: {run_info['application_name']}")
-        print(f"Status: {run_info['status']}")
+        print(f"Total Attempts: {attempt_id}")
+        print(f"Final Status: {run_info['status']}")
         print(f"Start Time: {run_info['start_time']}")
         print(f"End Time: {run_info['end_time']}")
         print(f"Duration: {run_info['duration']}")
-        print(f"Total Jobs: {run_info['total_jobs']}")
+        print(f"Total Jobs in Config: {run_info['total_jobs']}")
 
         jobs = run_details['jobs']
 
@@ -404,9 +413,21 @@ See README.md and docs/ directory in the project repository.
         skipped_jobs = [j for j in jobs if j['status'] == 'SKIPPED']
         other_jobs = [j for j in jobs if j['status'] not in ['SUCCESS', 'FAILED', 'ERROR', 'TIMEOUT', 'SKIPPED']]
 
-        print(f"Successful Jobs: {len(successful_jobs)}")
-        print(f"Failed Jobs: {len(failed_jobs)}")
-        print(f"Skipped Jobs: {len(skipped_jobs)}")
+        unique_jobs = len(set(j['id'] for j in jobs))
+        total_executions = len(jobs)
+        print(f"Unique Jobs Executed: {unique_jobs}")
+        print(f"Total Executions: {total_executions}")
+        print(f"  - Successful: {len(successful_jobs)}")
+        print(f"  - Failed: {len(failed_jobs)}")
+        print(f"  - Skipped: {len(skipped_jobs)}")
+        
+        # Show jobs that ran multiple times
+        if total_executions > unique_jobs:
+            from collections import Counter
+            job_counts = Counter(j['id'] for j in jobs)
+            multi_runs = [f"{job_id} ({count}x)" for job_id, count in job_counts.items() if count > 1]
+            if multi_runs:
+                print(f"Jobs with multiple executions: {', '.join(multi_runs)}")
         # Use stored working directory for log path, fallback to current directory
         if run_info.get('working_dir'):
             log_path = os.path.join(run_info['working_dir'], 'logs', f"executioner.{run_info['application_name']}.run-{args.show_run}.log")
@@ -416,11 +437,11 @@ See README.md and docs/ directory in the project repository.
         print(f"Main log: {log_path}")
 
         # Display job details in tabular format
-        print(f"\nJob Status Details:")
-        # Calculate table width: 30 + 3 + 8 + 3 + 19 + 3 + 19 + 3 + 8 = 96
-        table_width = 96
+        print(f"\nJob Status Details (All Attempts):")
+        # Calculate table width: 30 + 3 + 7 + 3 + 8 + 3 + 19 + 3 + 19 + 3 + 8 = 106
+        table_width = 106
         print("=" * table_width)
-        print(f"{'Job ID':30} | {'Status':8} | {'Start Time':19} | {'End Time':19} | {'Duration':>8}")
+        print(f"{'Job ID':30} | {'Attempt':7} | {'Status':8} | {'Start Time':19} | {'End Time':19} | {'Duration':>8}")
         print("-" * table_width)
 
         # Display all jobs in tabular format (ordered by execution time)
@@ -439,32 +460,42 @@ See README.md and docs/ directory in the project repository.
 
             # Truncate job ID if too long
             job_id = job['id'][:29] if len(job['id']) > 29 else job['id']
+            attempt_str = f"#{job.get('attempt_id', 1)}"
 
-            print(f"{job_id:30} | {job['status']:8} | {start_time:19} | {end_time:19} | {duration_str:>8}")
+            print(f"{job_id:30} | {attempt_str:7} | {job['status']:8} | {start_time:19} | {end_time:19} | {duration_str:>8}")
 
         print()  # Add newline after table
 
-        # Display failed job commands if any
-        if failed_jobs:
-            print(f"\nFailed Job Commands:")
-            print("-" * 80)
-            for job in failed_jobs:
-                if job.get('command'):
-                    print(f"{job['id']}: {job['command']}")
-
-        # Display resume instructions if there are failed jobs
-        if failed_jobs or skipped_jobs:
-            print(f"\nResume Options:")
-            print("-" * 80)
-            print(f"To resume all incomplete jobs:")
-            print(f"  executioner.py -c <config> --resume-from {args.show_run}")
-            print(f"\nTo retry only failed jobs:")
-            print(f"  executioner.py -c <config> --resume-from {args.show_run} --resume-failed-only")
-
+        # Only show failed jobs and resume options if the final status is not SUCCESS
+        if run_info['status'] != 'SUCCESS':
+            # Display failed job commands if any
             if failed_jobs:
-                failed_job_ids = ','.join([j['id'] for j in failed_jobs])
-                print(f"\nTo mark failed jobs as successful:")
-                print(f"  executioner.py --mark-success -r {args.show_run} -j {failed_job_ids}")
+                print(f"\nFailed Job Commands:")
+                print("-" * 80)
+                for job in failed_jobs:
+                    if job.get('command'):
+                        print(f"{job['id']}: {job['command']}")
+
+            # Display resume instructions
+            if failed_jobs or skipped_jobs:
+                print(f"\nResume Options:")
+                print("-" * 80)
+                # Always use the original run ID for resume commands
+                original_run = run_info.get('original_run_id', args.show_run)
+                print(f"To continue this workflow:")
+                print(f"  executioner.py -c <config> --resume-from {original_run}")
+                if failed_jobs:
+                    print(f"\nTo retry only failed jobs:")
+                    print(f"  executioner.py -c <config> --resume-from {original_run} --resume-failed-only")
+
+                if failed_jobs:
+                    failed_job_ids = ','.join([j['id'] for j in failed_jobs])
+                    print(f"\nTo mark failed jobs as successful:")
+                    print(f"  executioner.py --mark-success -r {args.show_run} -j {failed_job_ids}")
+        else:
+            # Show completion information for successful runs
+            if attempt_id > 1:
+                print(f"\n✓ Run completed successfully after {attempt_id} attempts")
 
         sys.exit(0)
 

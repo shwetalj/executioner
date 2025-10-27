@@ -90,8 +90,11 @@ class ExecutionOrchestrator:
             if not previous_job_statuses:
                 self.logger.error(f"No job history found for run ID {resume_run_id}. Showing full plan.")
             else:
+                # Use original run ID for display
+                original_run = self.state_manager.resume_run_id or resume_run_id
+                attempt_num = self.state_manager.attempt_id
                 resume_mode = "failed jobs only" if resume_failed_only else "all incomplete jobs"
-                self.logger.info(f"Resuming from run ID {resume_run_id} ({resume_mode})")
+                self.logger.info(f"Resuming run {original_run} (attempt {attempt_num}, {resume_mode})")
                 
                 # Apply resume logic to determine skip jobs
                 resume_skip_jobs = self.state_manager.determine_jobs_to_skip()
@@ -453,10 +456,23 @@ class ExecutionOrchestrator:
         
         divider = f"{Config.COLOR_CYAN}{'='*40}{Config.COLOR_RESET}"
         print(f"\n{divider}")
-        print(f"{Config.COLOR_CYAN}{'DRY RUN EXECUTION SUMMARY':^40}{Config.COLOR_RESET}")
+        
+        # Show appropriate title based on resume status
+        if self.state_manager.resume_run_id:
+            title = f'DRY RUN - RESUME #{self.state_manager.resume_run_id} (Attempt {self.state_manager.attempt_id})'
+        else:
+            title = 'DRY RUN EXECUTION SUMMARY'
+        
+        print(f"{Config.COLOR_CYAN}{title:^40}{Config.COLOR_RESET}")
         print(f"{divider}")
         print(f"{Config.COLOR_CYAN}Application:{Config.COLOR_RESET} {self.application_name}")
-        print(f"{Config.COLOR_CYAN}Run ID:{Config.COLOR_RESET} {self.state_manager.run_id}")
+        
+        # Show original run or current run ID appropriately
+        if self.state_manager.resume_run_id:
+            print(f"{Config.COLOR_CYAN}Original Run:{Config.COLOR_RESET} {self.state_manager.resume_run_id}")
+            print(f"{Config.COLOR_CYAN}Tracking ID:{Config.COLOR_RESET} {self.state_manager.run_id} {Config.COLOR_CYAN}(internal){Config.COLOR_RESET}")
+        else:
+            print(f"{Config.COLOR_CYAN}Run ID:{Config.COLOR_RESET} {self.state_manager.run_id}")
         print(f"{Config.COLOR_CYAN}Start Time:{Config.COLOR_RESET} {start_time_str}")
         print(f"{Config.COLOR_CYAN}End Time:{Config.COLOR_RESET} {end_time_str}")
         print(f"{Config.COLOR_CYAN}Duration:{Config.COLOR_RESET} {duration_str}")

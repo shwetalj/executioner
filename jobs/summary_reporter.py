@@ -41,7 +41,8 @@ class SummaryReporter:
         completed_jobs: Set[str], 
         failed_jobs: Set[str], 
         skip_jobs: Set[str],
-        exit_code: int
+        exit_code: int,
+        attempt_id: int = None
     ) -> None:
         """Print the main execution summary header."""
         status_color = Config.COLOR_DARK_GREEN if exit_code == 0 else Config.COLOR_RED
@@ -51,7 +52,10 @@ class SummaryReporter:
         print(f"{Config.COLOR_CYAN}{'EXECUTION SUMMARY':^40}{Config.COLOR_RESET}")
         print(f"{divider}")
         print(f"{Config.COLOR_CYAN}Application:{Config.COLOR_RESET} {self.application_name}")
-        print(f"{Config.COLOR_CYAN}Run ID:{Config.COLOR_RESET} {Config.COLOR_YELLOW}{run_id}{Config.COLOR_RESET}")
+        if attempt_id and attempt_id > 1:
+            print(f"{Config.COLOR_CYAN}Run ID:{Config.COLOR_RESET} {Config.COLOR_YELLOW}{run_id} (Attempt {attempt_id}){Config.COLOR_RESET}")
+        else:
+            print(f"{Config.COLOR_CYAN}Run ID:{Config.COLOR_RESET} {Config.COLOR_YELLOW}{run_id}{Config.COLOR_RESET}")
         print(f"{Config.COLOR_CYAN}Status:{Config.COLOR_RESET} {status_color}{status}{Config.COLOR_RESET}")
         print(f"{Config.COLOR_CYAN}Start Time:{Config.COLOR_RESET} {start_time_str}")
         print(f"{Config.COLOR_CYAN}End Time:{Config.COLOR_RESET} {end_time_str}")
@@ -121,11 +125,12 @@ class SummaryReporter:
         run_id: int, 
         exit_code: int, 
         failed_job_order: List[str], 
-        has_skipped_deps: bool
+        has_skipped_deps: bool,
+        attempt_id: int = None
     ) -> None:
         """Print resume instructions for failed runs."""
         if exit_code == 0:
-            self._print_successful_run_info(run_id)
+            self._print_successful_run_info(run_id, attempt_id)
             return
             
         if not (failed_job_order or has_skipped_deps):
@@ -134,7 +139,8 @@ class SummaryReporter:
         print(f"\n{Config.COLOR_CYAN}RESUME OPTIONS:{Config.COLOR_RESET}")
         print(f"{Config.COLOR_CYAN}{'='*len('RESUME OPTIONS:')}{Config.COLOR_RESET}")
         
-        print(f"To resume this run (all incomplete jobs):")
+        # Always use the run_id for resume instructions
+        print(f"To continue this workflow:")
         print(f"  {Config.COLOR_BLUE}executioner.py -c {self.config_file} --resume-from {run_id}{Config.COLOR_RESET}")
         
         if failed_job_order:
@@ -149,10 +155,15 @@ class SummaryReporter:
         print(f"\nTo see detailed job status:")
         print(f"  {Config.COLOR_BLUE}executioner.py --show-run {run_id}{Config.COLOR_RESET}")
 
-    def _print_successful_run_info(self, run_id: int) -> None:
+    def _print_successful_run_info(self, run_id: int, attempt_id: int = None) -> None:
         """Print run information for successful executions."""
         print(f"\n{Config.COLOR_CYAN}RUN INFORMATION:{Config.COLOR_RESET}")
         print(f"{Config.COLOR_CYAN}{'='*len('RUN INFORMATION:')}{Config.COLOR_RESET}")
+        
+        # Show attempt info if this was a resume
+        if attempt_id and attempt_id > 1:
+            print(f"{Config.COLOR_DARK_GREEN}✓ Run #{run_id} completed successfully after {attempt_id} attempts{Config.COLOR_RESET}")
+        
         print(f"To view detailed job status for this run:")
         print(f"  {Config.COLOR_BLUE}executioner.py --show-run {run_id}{Config.COLOR_RESET}")
         print(f"\nTo list all recent runs for {self.application_name}:")

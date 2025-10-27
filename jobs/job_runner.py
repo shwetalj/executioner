@@ -112,7 +112,7 @@ class JobRunner(JobStatusMixin):
                 attempt_start_dt = datetime.datetime.now()
                 exit_code = None
                 try:
-                    status = self._run_command(command, timeout, job_logger)
+                    status = self._run_command(command, timeout, job_logger, attempt_start_dt)
                     exit_code = getattr(self, 'last_exit_code', None)
                 except Exception as e:
                     status = "ERROR"
@@ -219,7 +219,7 @@ class JobRunner(JobStatusMixin):
                 if hasattr(self, 'main_logger'):
                     self.main_logger.debug(f"Error closing file handler: {e}")
 
-    def _run_command(self, command, timeout, job_logger):
+    def _run_command(self, command, timeout, job_logger, start_time_dt=None):
         import threading
         # Merge environment variables: app -> job -> CLI (CLI has highest precedence)
         merged_env = merge_env_vars(self.global_env, self.job.get("env_variables", {}))
@@ -280,7 +280,12 @@ class JobRunner(JobStatusMixin):
                     job_logger.warning("Output reading thread did not terminate cleanly after timeout")
                 # Set exit code to EXIT_CODE_TIMEOUT for timeout
                 self.last_exit_code = EXIT_CODE_TIMEOUT
-                self.mark_failed(self.job_id, "TIMEOUT")
+                # Calculate duration from start if available
+                if start_time_dt:
+                    duration = (datetime.datetime.now() - start_time_dt).total_seconds()
+                    self.mark_failed(self.job_id, "TIMEOUT", duration=duration, start_time=start_time_dt.strftime('%Y-%m-%d %H:%M:%S'))
+                else:
+                    self.mark_failed(self.job_id, "TIMEOUT")
                 return "TIMEOUT"
             stop_reading.set()
             reader_thread.join(timeout=5)
@@ -289,17 +294,32 @@ class JobRunner(JobStatusMixin):
             self.last_exit_code = exit_code
             if exit_code == EXIT_CODE_SUCCESS:
                 job_logger.info(f"Job {self.job_id}: SUCCESS")
-                self.mark_success(self.job_id)
+                # Calculate duration from start if available
+                if start_time_dt:
+                    duration = (datetime.datetime.now() - start_time_dt).total_seconds()
+                    self.mark_success(self.job_id, duration=duration, start_time=start_time_dt.strftime('%Y-%m-%d %H:%M:%S'))
+                else:
+                    self.mark_success(self.job_id)
                 return "SUCCESS"
             else:
                 job_logger.error(f"Job {self.job_id}: FAILED with exit code {exit_code}")
-                self.mark_failed(self.job_id, "FAILED")
+                # Calculate duration from start if available
+                if start_time_dt:
+                    duration = (datetime.datetime.now() - start_time_dt).total_seconds()
+                    self.mark_failed(self.job_id, "FAILED", duration=duration, start_time=start_time_dt.strftime('%Y-%m-%d %H:%M:%S'))
+                else:
+                    self.mark_failed(self.job_id, "FAILED")
                 return "FAILED"
         except Exception as e:
             job_logger.error(f"Exception during command execution: {e}")
             # Set exit code to EXIT_CODE_EXCEPTION for exceptions
             self.last_exit_code = EXIT_CODE_EXCEPTION
-            self.mark_failed(self.job_id, "ERROR")
+            # Calculate duration from start if available
+            if start_time_dt:
+                duration = (datetime.datetime.now() - start_time_dt).total_seconds()
+                self.mark_failed(self.job_id, "ERROR", duration=duration, start_time=start_time_dt.strftime('%Y-%m-%d %H:%M:%S'))
+            else:
+                self.mark_failed(self.job_id, "ERROR")
             return "ERROR"
         finally:
             # Ensure thread cleanup

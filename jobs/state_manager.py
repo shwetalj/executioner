@@ -46,6 +46,7 @@ class StateManager:
 
         # Run state
         self.run_id: Optional[int] = None
+        self.attempt_id: int = 1  # Default attempt_id for new runs
         self.start_time: Optional[datetime.datetime] = None
         self.end_time: Optional[datetime.datetime] = None
         self.exit_code: int = 0
@@ -60,16 +61,28 @@ class StateManager:
         self.resume_failed_only: bool = False
         self.previous_job_statuses: Dict[str, str] = {}
 
-    def initialize_run(self) -> int:
+    def initialize_run(self, resume_run_id: Optional[int] = None) -> int:
         """
         Initialize a new execution run.
+        
+        Args:
+            resume_run_id: If resuming, the run ID to resume from
 
         Returns:
-            The new run ID
+            The run ID (reused for resumes, new for fresh runs)
         """
-        self.run_id = self.job_history.get_new_run_id()
+        if resume_run_id is not None:
+            # When resuming, reuse the same run_id but increment attempt_id
+            self.run_id = resume_run_id
+            self.attempt_id = self.job_history.get_next_attempt_id(resume_run_id)
+        else:
+            # Fresh run - get new run_id with attempt_id = 1
+            self.run_id = self.job_history.get_new_run_id()
+            self.attempt_id = 1
+        
         self.job_history.run_id = self.run_id
-        self.logger.info(f"Initialized new run with ID: {self.run_id}")
+        self.job_history.attempt_id = self.attempt_id
+        self.logger.info(f"Initialized run ID: {self.run_id}, attempt: {self.attempt_id}")
         return self.run_id
 
     def start_execution(self, continue_on_error: bool = False, dry_run: bool = False, working_dir: str = None) -> None:
@@ -92,6 +105,7 @@ class StateManager:
             try:
                 self.job_history.create_run_summary(
                     self.run_id,
+                    self.attempt_id,
                     self.application_name,
                     self.start_time,
                     len(self.jobs),
@@ -130,6 +144,7 @@ class StateManager:
         if not self.dry_run and self.run_id is not None:
             self.job_history.update_run_summary(
                 self.run_id,
+                self.attempt_id,
                 self.end_time,
                 status,
                 len(completed_jobs),
@@ -150,10 +165,27 @@ class StateManager:
         Returns:
             Dictionary mapping job IDs to their previous status
         """
+        # First check if the run was already successful
+        latest_attempt = self.job_history.get_latest_attempt_id(resume_run_id)
+        if latest_attempt:
+            # Check the status of the latest attempt
+            from db.sqlite_connection import db_connection
+            with db_connection(self.logger) as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT status FROM run_summary 
+                    WHERE run_id = ? AND attempt_id = ?
+                """, (resume_run_id, latest_attempt))
+                result = cursor.fetchone()
+                if result and result[0] == 'SUCCESS':
+                    self.logger.warning(f"Run {resume_run_id} already completed successfully in attempt {latest_attempt}. Resume may be unnecessary.")
+                    print(f"\n{chr(9888)} Warning: Run #{resume_run_id} already completed successfully. All jobs will be skipped.\n")
+        
+        # Store resume info
         self.resume_run_id = resume_run_id
         self.resume_failed_only = resume_failed_only
 
-        # Load previous run status
+        # Load previous run status (get_previous_run_status handles finding the latest attempt)
         self.previous_job_statuses = self.job_history.get_previous_run_status(resume_run_id)
 
         if not self.previous_job_statuses:
@@ -161,7 +193,7 @@ class StateManager:
             return {}
 
         resume_mode = "failed jobs only" if resume_failed_only else "all incomplete jobs"
-        self.logger.info(f"Resuming from run ID {resume_run_id} ({resume_mode})")
+        self.logger.info(f"Resuming run {resume_run_id} (attempt {self.attempt_id}, {resume_mode})")
 
         return self.previous_job_statuses.copy()
 

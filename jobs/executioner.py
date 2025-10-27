@@ -85,9 +85,9 @@ class JobExecutioner:
         self.job_history = ExecutionHistoryManager(self.jobs, self.application_name, None, temp_logger)
         self.state_manager = StateManager(self.jobs, self.application_name, self.job_history, temp_logger)
 
-        # Initialize run and set up logger with run_id
-        self.run_id = self.state_manager.initialize_run()
-        self.logger = setup_logging(self.application_name, self.run_id)
+        # Don't initialize run_id yet - will be done in run() method
+        self.run_id = None
+        self.logger = temp_logger  # Use temp logger for now
         self.job_history.set_logger(self.logger)
 
         # Email notification settings
@@ -376,6 +376,19 @@ class JobExecutioner:
         if self.dependency_plugins:
             self.logger.info(f"Found {len(self.dependency_plugins)} dependency plugins to load")
             self.dependency_manager.load_dependency_plugins()
+        
+        # Initialize run (with resume_run_id if resuming)
+        self.run_id = self.state_manager.initialize_run(resume_run_id)
+        
+        # Now set up the proper logger with run_id
+        self.logger = setup_logging(self.application_name, self.run_id)
+        self.job_history.set_logger(self.logger)
+        self.state_manager.logger = self.logger
+        
+        # Handle resume setup if needed
+        if resume_run_id is not None:
+            previous_job_statuses = self.state_manager.setup_resume(resume_run_id, resume_failed_only)
+        
         # Set initial state through state manager
         self.state_manager.start_execution(continue_on_error, dry_run, self.working_dir)
         self.skip_jobs = set(skip_jobs or [])
@@ -405,18 +418,26 @@ class JobExecutioner:
                 return self.exit_code
         # StateManager.start_execution() already handles timing and run summary creation
         print(f"{divider}")
-        print(f"{Config.COLOR_CYAN}{f'STARTING EXECUTION Application {self.application_name} - RUN #{self.run_id}{dry_run_text}{parallel_text}':^90}{Config.COLOR_RESET}")
-        print(f"{divider}")
-        # Handle resume functionality
+        
+        # Display appropriate header based on whether this is a resume
         if resume_run_id is not None:
-            previous_job_statuses = self.state_manager.setup_resume(resume_run_id, resume_failed_only)
+            # This is a resume - show run and attempt
+            header_text = f'RESUMING RUN #{self.run_id} (Attempt {self.state_manager.attempt_id}) - {self.application_name}{dry_run_text}{parallel_text}'
+            print(f"{Config.COLOR_CYAN}{header_text:^90}{Config.COLOR_RESET}")
+        else:
+            # This is a new run
+            print(f"{Config.COLOR_CYAN}{f'STARTING EXECUTION Application {self.application_name} - RUN #{self.run_id}{dry_run_text}{parallel_text}':^90}{Config.COLOR_RESET}")
+        
+        print(f"{divider}")
+        # Handle resume functionality (already set up above, now just determine skip jobs)
+        if resume_run_id is not None:
             resume_skip_jobs = self.state_manager.determine_jobs_to_skip()
             # Add resume skip jobs to current skip jobs
             current_skip_jobs = set(skip_jobs or [])
             self.skip_jobs = current_skip_jobs | resume_skip_jobs
             # Mark successful jobs as completed in queue manager
             for job_id in resume_skip_jobs:
-                if job_id in previous_job_statuses and previous_job_statuses[job_id] == "SUCCESS":
+                if job_id in self.state_manager.previous_job_statuses and self.state_manager.previous_job_statuses[job_id] == "SUCCESS":
                     self.completed_jobs.add(job_id)
         # Queue initial jobs that have all dependencies satisfied
         self.queue_manager.queue_initial_jobs()
@@ -472,7 +493,8 @@ class JobExecutioner:
             completed_jobs=self.completed_jobs,
             failed_jobs=self.failed_jobs,
             skip_jobs=self.skip_jobs,
-            exit_code=self.exit_code
+            exit_code=self.exit_code,
+            attempt_id=self.state_manager.attempt_id
         )
 
         # Calculate skipped jobs due to dependencies
@@ -503,7 +525,8 @@ class JobExecutioner:
             run_id=self.run_id,
             exit_code=self.exit_code,
             failed_job_order=failed_job_order,
-            has_skipped_deps=bool(skipped_due_to_deps)
+            has_skipped_deps=bool(skipped_due_to_deps),
+            attempt_id=self.state_manager.attempt_id
         )
 
         # Print final divider

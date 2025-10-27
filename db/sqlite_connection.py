@@ -180,6 +180,83 @@ def init_db(verbose=False, logger=None):
                 -- DROP TABLE run_summary;
                 -- CREATE TABLE run_summary AS SELECT * FROM backup;
                 -- DROP TABLE backup;
+                """),
+                (7, "Add attempt tracking with composite key", [
+                    """
+                    -- Create new table with composite primary key
+                    CREATE TABLE IF NOT EXISTS run_summary_new (
+                        run_id INTEGER NOT NULL,
+                        attempt_id INTEGER NOT NULL DEFAULT 1,
+                        application_name TEXT NOT NULL,
+                        start_time TIMESTAMP NOT NULL,
+                        end_time TIMESTAMP,
+                        status TEXT,
+                        total_jobs INTEGER DEFAULT 0,
+                        completed_jobs INTEGER DEFAULT 0,
+                        failed_jobs INTEGER DEFAULT 0,
+                        skipped_jobs INTEGER DEFAULT 0,
+                        exit_code INTEGER,
+                        working_dir TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        PRIMARY KEY (run_id, attempt_id)
+                    )
+                    """,
+                    """
+                    -- Copy existing data with attempt_id = 1 for all existing runs
+                    INSERT INTO run_summary_new (run_id, attempt_id, application_name, start_time, 
+                                                end_time, status, total_jobs, completed_jobs, 
+                                                failed_jobs, skipped_jobs, exit_code, working_dir, created_at)
+                    SELECT run_id, 1, application_name, start_time, end_time, status, 
+                           total_jobs, completed_jobs, failed_jobs, skipped_jobs, exit_code, 
+                           working_dir, created_at
+                    FROM run_summary
+                    """,
+                    "DROP TABLE IF EXISTS run_summary",
+                    "ALTER TABLE run_summary_new RENAME TO run_summary",
+                    "CREATE INDEX IF NOT EXISTS idx_run_summary_app ON run_summary (application_name)",
+                    "CREATE INDEX IF NOT EXISTS idx_run_summary_status ON run_summary (status)",
+                    "CREATE INDEX IF NOT EXISTS idx_run_summary_run ON run_summary (run_id)"
+                ], None, """
+                -- Rollback: restore original table structure
+                -- CREATE TABLE run_summary AS SELECT run_id, application_name, start_time, end_time, status, total_jobs, completed_jobs, failed_jobs, skipped_jobs, exit_code, working_dir, created_at FROM run_summary;
+                """),
+                (8, "Update job_history for composite key", [
+                    """
+                    -- Create new job_history table with composite key
+                    CREATE TABLE IF NOT EXISTS job_history_new (
+                        run_id INTEGER NOT NULL,
+                        attempt_id INTEGER NOT NULL DEFAULT 1,
+                        id TEXT NOT NULL,
+                        description TEXT,
+                        command TEXT,
+                        status TEXT,
+                        application_name TEXT,
+                        duration_seconds REAL,
+                        memory_usage_mb REAL,
+                        cpu_usage_percent REAL,
+                        retry_count INTEGER DEFAULT 0,
+                        last_error TEXT,
+                        retry_history TEXT,
+                        last_run TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        PRIMARY KEY (run_id, attempt_id, id)
+                    )
+                    """,
+                    """
+                    -- Copy existing data with attempt_id = 1
+                    INSERT INTO job_history_new (run_id, attempt_id, id, description, command, status, 
+                                                application_name, duration_seconds, memory_usage_mb, 
+                                                cpu_usage_percent, retry_count, last_error, retry_history, last_run)
+                    SELECT run_id, 1, id, description, command, status, application_name, 
+                           duration_seconds, memory_usage_mb, cpu_usage_percent, retry_count, 
+                           last_error, retry_history, last_run
+                    FROM job_history
+                    """,
+                    "DROP TABLE IF EXISTS job_history",
+                    "ALTER TABLE job_history_new RENAME TO job_history",
+                    "CREATE INDEX IF NOT EXISTS idx_job_history_run ON job_history (run_id, attempt_id)",
+                    "CREATE INDEX IF NOT EXISTS idx_job_history_status ON job_history (status)"
+                ], None, """
+                -- Rollback: restore original job_history structure
                 """)
             ]
             migration_id = None
