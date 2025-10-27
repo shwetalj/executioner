@@ -1,5 +1,6 @@
 {
-  "application_name": "test_shell_isolation",
+    "working_dir": "/home/sjoshi/claudelab/executioner",
+  "name": "test_shell_isolation",
   "inherit_shell_env": false,
   "env_variables": {
     "MY_APP_VAR": "app_value"

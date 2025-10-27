@@ -1,5 +1,6 @@
 {
-  "application_name": "test_env",
+    "working_dir": "/home/sjoshi/claudelab/executioner",
+  "name": "test_env",
   "env_variables": {
     "GLOBAL_MSG": "SHWETAL_GLOBAL"
   },

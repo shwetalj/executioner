@@ -1,4 +1,5 @@
 {
+    "working_dir": "/home/sjoshi/claudelab/executioner",
     "application_name": "maximal_job_test",
     "email_address": "test@example.com",
     "env_variables": {"APP_LEVEL": "yes"},

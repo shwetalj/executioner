@@ -1,4 +1,5 @@
 {
+    "working_dir": "/home/sjoshi/claudelab/executioner",
     "application_name": "plugin_test_app",
     "email_address": "test@example.com",
     "dependency_plugins": [

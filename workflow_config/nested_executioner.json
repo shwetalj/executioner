@@ -1,5 +1,6 @@
 {
-  "application_name": "meta-executioner-demo",
+    "working_dir": "/home/sjoshi/claudelab/executioner",
+  "name": "meta-executioner-demo",
   "jobs": [
     {
       "id": "echo_hello",
@@ -9,7 +10,7 @@
     {
       "id": "echo_nested_executioner",
       "description": "Pretend to run a nested executioner config",
-      "command": "./executioner.py -c config/child_executioner.json"
+      "command": "./executioner.py -c workflow_config/child_executioner.json"
     },
     {
       "id": "echo_goodbye",

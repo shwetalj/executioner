@@ -1,5 +1,6 @@
 {
-    "application_name": "failures_test_array",
+    "working_dir": "/home/sjoshi/claudelab/executioner",
+    "name": "failures_test_array",
     "default_timeout": 2,
     "email_address": ["shwetal.joshi@gmail.com", "shwetal.s.joshi@gmail.com"],
     "email_on_success": false,

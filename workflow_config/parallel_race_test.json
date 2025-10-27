@@ -1,5 +1,5 @@
 {
-    "application_name": "parallel_race_test",
+    "name": "parallel_race_test",
     "email_address": "test@example.com",
     "email_on_success": false,
     "email_on_failure": false,

@@ -1,5 +1,6 @@
 {
-    "application_name": "retry_test",
+    "working_dir": "/home/sjoshi/claudelab/executioner",
+    "name": "retry_test",
     "email_address": "test@example.com",
     "email_on_success": false,
     "email_on_failure": false,
