@@ -464,6 +464,26 @@ See README.md and docs/ directory in the project repository.
 
             print(f"{job_id:30} | {attempt_str:7} | {job['status']:8} | {start_time:19} | {end_time:19} | {duration_str:>8}")
 
+            # Display retry details if available
+            retry_count = job.get('retry_count')
+            retry_history = job.get('retry_history')
+            if retry_count and retry_count > 0 and retry_history:
+                try:
+                    retry_data = json.loads(retry_history) if isinstance(retry_history, str) else retry_history
+                    if retry_data and len(retry_data) > 0:
+                        total_attempts = len(retry_data)
+                        print(f"  {'Retry Details:':30}   {total_attempts} total attempt(s), {retry_count} retry/retries")
+                        for attempt in retry_data:
+                            attempt_num = attempt.get('attempt', '?')
+                            attempt_status = attempt.get('status', 'UNKNOWN')
+                            attempt_duration = attempt.get('duration', 0)
+                            attempt_timestamp = attempt.get('timestamp', 'N/A')[:19] if attempt.get('timestamp') else 'N/A'
+                            attempt_exit_code = attempt.get('exit_code', 'N/A')
+                            print(f"     {'Attempt ' + str(attempt_num) + ':':30}   {attempt_status:8} ({attempt_duration:.2f}s) at {attempt_timestamp} - exit code {attempt_exit_code}")
+                except (json.JSONDecodeError, TypeError, ValueError, UnicodeEncodeError) as e:
+                    # Silently skip malformed retry history or encoding errors
+                    pass
+
         print()  # Add newline after table
 
         # Only show failed jobs and resume options if the final status is not SUCCESS
