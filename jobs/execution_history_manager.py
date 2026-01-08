@@ -573,9 +573,9 @@ class ExecutionHistoryManager:
 
             # Get individual job details from ALL attempts
             if has_attempt_id:
-                # Include attempt_id in the results
+                # Include attempt_id and retry information in the results
                 cursor.execute("""
-                    SELECT id, description, command, status, last_run, duration_seconds, attempt_id
+                    SELECT id, description, command, status, last_run, duration_seconds, attempt_id, retry_count, retry_history
                     FROM job_history
                     WHERE run_id = ?
                     ORDER BY last_run, attempt_id
@@ -592,10 +592,12 @@ class ExecutionHistoryManager:
             jobs = []
             for job_row in cursor.fetchall():
                 if has_attempt_id:
-                    job_id, description, command, job_status, last_run, duration_seconds, job_attempt = job_row
+                    job_id, description, command, job_status, last_run, duration_seconds, job_attempt, retry_count, retry_history = job_row
                 else:
                     job_id, description, command, job_status, last_run, duration_seconds = job_row
                     job_attempt = 1
+                    retry_count = None
+                    retry_history = None
 
                 # Calculate end time from start time and duration
                 end_time = None
@@ -619,7 +621,9 @@ class ExecutionHistoryManager:
                     'last_run': last_run,
                     'duration_seconds': duration_seconds,
                     'end_time': end_time,
-                    'attempt_id': job_attempt
+                    'attempt_id': job_attempt,
+                    'retry_count': retry_count,
+                    'retry_history': retry_history
                 })
 
             return {
@@ -648,9 +652,18 @@ class ExecutionHistoryManager:
         with db_connection(self.logger) as conn:
             cursor = conn.cursor()
             cursor.executemany("""
-                INSERT OR REPLACE INTO job_history
+                INSERT INTO job_history
                 (run_id, attempt_id, id, description, command, status, application_name, last_run, duration_seconds)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(run_id, attempt_id, id)
+                DO UPDATE SET
+                    description = excluded.description,
+                    command = excluded.command,
+                    status = excluded.status,
+                    application_name = excluded.application_name,
+                    last_run = excluded.last_run,
+                    duration_seconds = excluded.duration_seconds
+                    -- Preserve retry_count and retry_history by not updating them
             """, self.job_status_batch)
             conn.commit()
         self.job_status_batch.clear()
@@ -702,19 +715,20 @@ class ExecutionHistoryManager:
                             raise
                 conn.commit()
             cursor.execute(
-                "SELECT 1 FROM job_history WHERE run_id = ? AND id = ?",
-                (self.run_id, job_id)
+                "SELECT 1 FROM job_history WHERE run_id = ? AND attempt_id = ? AND id = ?",
+                (self.run_id, self.attempt_id, job_id)
             )
             if not cursor.fetchone():
                 job = self.jobs[job_id]
                 cursor.execute(
                     """
                     INSERT INTO job_history
-                    (run_id, id, description, command, status, application_name)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    (run_id, attempt_id, id, description, command, status, application_name)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         self.run_id,
+                        self.attempt_id,
                         job_id,
                         job.get("description", ""),
                         job["command"],

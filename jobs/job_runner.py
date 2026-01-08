@@ -206,6 +206,22 @@ class JobRunner(JobStatusMixin):
                 return False, fail_reason
             return False
         finally:
+            # Save retry history if there were any attempts
+            if retry_history and hasattr(self, 'job_history') and self.job_history:
+                try:
+                    retry_count = len(retry_history) - 1  # First attempt is not a retry
+                    self.record_retry(
+                        self.job_id,
+                        retry_history,
+                        retry_count,
+                        retry_history[-1]['status'] if retry_history else 'UNKNOWN',
+                        fail_reason
+                    )
+                    self.main_logger.debug(f"Saved retry history for {self.job_id}: {len(retry_history)} attempts")
+                except Exception as e:
+                    if hasattr(self, 'main_logger'):
+                        self.main_logger.error(f"Error saving retry history: {e}")
+
             try:
                 job_logger.removeHandler(job_file_handler)
             except Exception as e:
